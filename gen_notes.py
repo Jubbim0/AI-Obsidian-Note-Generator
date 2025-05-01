@@ -1,17 +1,26 @@
 import sys
 import subprocess
 from pathlib import Path
-import openai
+from openai import OpenAI
 from dotenv import load_dotenv
 import os
 
 # ============ CONFIGURATION ============
+# Load environment variables first
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
-if not openai.api_key:
-    raise ValueError("OPENAI_API_KEY environment variable is not set. Please create a .env file with your API key.")
+
+# Get API key and validate
+api_key = os.getenv("OPENAI_API_KEY")
+if not api_key:
+    raise ValueError(
+        "OPENAI_API_KEY environment variable is not set. Please create a .env file with your API key."
+    )
+
+# Initialize OpenAI client after validating API key
+client = OpenAI(api_key=api_key)
 
 # ============ FILE HANDLERS ============
+
 
 def check_dependencies():
     """Check if required dependencies are installed."""
@@ -23,18 +32,22 @@ def check_dependencies():
         print("Please install required packages: pip install PyPDF2 python-pptx")
         sys.exit(1)
 
+
 def extract_text_from_pdf(pdf_path: Path) -> str:
     try:
         from PyPDF2 import PdfReader
+
         reader = PdfReader(str(pdf_path))
         return "\n".join([page.extract_text() or "" for page in reader.pages])
     except Exception as e:
         print(f"Error processing PDF {pdf_path.name}: {e}")
         return ""
 
+
 def extract_text_from_pptx(pptx_path: Path) -> str:
     try:
         from pptx import Presentation
+
         prs = Presentation(str(pptx_path))
         text_runs = []
         for slide in prs.slides:
@@ -45,6 +58,7 @@ def extract_text_from_pptx(pptx_path: Path) -> str:
     except Exception as e:
         print(f"Error processing PPTX {pptx_path.name}: {e}")
         return ""
+
 
 def transcribe_audio_with_whisper(mp4_path: Path) -> str:
     try:
@@ -71,7 +85,9 @@ def transcribe_audio_with_whisper(mp4_path: Path) -> str:
         print(f"Error processing MP4 {mp4_path.name}: {e}")
         return ""
 
+
 # ============ TEXT COMBINATION ============
+
 
 def combine_inputs_to_text(resource_folder: Path) -> str:
     combined_text = ""
@@ -94,26 +110,30 @@ def combine_inputs_to_text(resource_folder: Path) -> str:
             combined_text += "---" + "\n\n"
     return combined_text
 
+
 # ============ OPENAI PROCESSING ============
+
 
 def query_openai_for_topics(text: str) -> str:
     print("Asking OpenAI for structured topics...")
-    
+
     # Get the path to the system prompt file relative to the script
     script_dir = Path(__file__).parent
     system_prompt_path = script_dir / "system_prompt.txt"
-    
+
     if not system_prompt_path.exists():
         raise FileNotFoundError(f"System prompt file not found at {system_prompt_path}")
-        
+
     with open(system_prompt_path, "r") as f:
         system_prompt = f.read()
-    
+
     # Warn if text is long but don't truncate
     if len(text) > 5000:
-        print(f"Warning: Input text length is {len(text)} characters. This may take longer to process.")
-    
-    response = openai.ChatCompletion.create(
+        print(
+            f"Warning: Input text length is {len(text)} characters. This may take longer to process."
+        )
+
+    response = client.chat.completions.create(
         model="gpt-4",
         messages=[
             {
@@ -127,35 +147,40 @@ def query_openai_for_topics(text: str) -> str:
         ],
         temperature=0.4,
     )
-    return response["choices"][0]["message"]["content"]
+    return response.choices[0].message.content
+
 
 # ============ NOTE CREATION ============
+
 
 def create_obsidian_notes(topics: str, output_dir: Path) -> None:
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Split the topics string into individual files
-    files = topics.split("---")
-    
-    for file_content in files:
-        file_content = file_content.strip()
+    files_combined = topics.split("---")
+    print(files_combined)
+    files = []
+    i = 0
+    while i < len(files_combined) - 1:
+        file_name = files_combined[i]
+        if not file_name:
+            continue
+        file_content = files_combined[i + 1]
         if not file_content:
             continue
-            
-        # Extract filename from the first line
-        lines = file_content.splitlines()
-        if not lines:
-            continue
-            
-        # Get filename from the first line (removing parentheses)
-        filename = lines[0].strip("()")
-        if not filename:
-            continue
-            
-        # Get the content (everything after the first line)
-        content = "\n".join(lines[1:]).strip()
-        
+        file_name = "".join(c for c in file_name if c.isalnum() or c in "._-")
+        # Check if filename has an extension
+        if "." in file_name:
+            # Replace existing extension with .md
+            file_name = file_name.rsplit(".", 1)[0] + ".md"
+        elif not file_name.endswith(".md"):
+            # Add .md extension if no extension exists
+            file_name += ".md"
+        files.append((file_name, file_content))
+        i += 2
+
+    for filename, content in files:
         # Create the file
         filepath = output_dir / filename
         try:
@@ -165,12 +190,14 @@ def create_obsidian_notes(topics: str, output_dir: Path) -> None:
         except Exception as e:
             print(f"Error creating file {filepath.name}: {e}")
 
+
 # ============ MAIN ============
+
 
 def main(lecture_dir_path: str):
     # Check dependencies first
     check_dependencies()
-    
+
     root_path = Path(lecture_dir_path).expanduser().resolve()
     resource_path = root_path / "Learning Resources"
 
@@ -178,9 +205,14 @@ def main(lecture_dir_path: str):
         print(f"Error: {resource_path} does not exist.")
         return
 
+    if True:  # testing
+        with open("test.txt", "r", encoding="utf-8") as f:
+            create_obsidian_notes(f.read(), root_path)
+        return
+
     print(f"🔍 Extracting data from: {resource_path}")
     all_text = combine_inputs_to_text(resource_path)
-    
+
     # Write extracted text to a file
     output_file = root_path / "extracted_text.txt"
     try:
@@ -202,6 +234,7 @@ def main(lecture_dir_path: str):
     create_obsidian_notes(topics, root_path)
 
     print("🎉 Done!")
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
