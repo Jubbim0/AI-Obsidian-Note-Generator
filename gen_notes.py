@@ -135,39 +135,34 @@ def transcribe_audio_with_whisper(mp4_path: Path, verbosity: int = 1) -> str:
 # ============ TEXT COMBINATION ============
 
 
-def combine_inputs_to_text(resource_folder: Path, verbosity: int = 1) -> str:
-    combined_text = ""
-    for file in resource_folder.iterdir():
-        ext = file.suffix.lower()
-        if ext == ".pdf":
-            logging.info(f"Processing PDF: {file.name}")
-            combined_text += f"PDF: {file.name}\n---\n"
-            combined_text += extract_text_from_pdf(file) + "\n\n"
-            combined_text += "---" + "\n\n"
-        elif ext == ".pptx":
-            logging.info(f"Processing PPTX: {file.name}")
-            combined_text += f"PPTX: {file.name}\n---\n"
-            combined_text += extract_text_from_pptx(file) + "\n\n"
-            combined_text += "---" + "\n\n"
-        elif ext == ".mp4":
-            logging.info(f"Processing MP4: {file.name}")
-            combined_text += f"MP4: {file.name}\n---\n"
-            combined_text += transcribe_audio_with_whisper(file, verbosity) + "\n\n"
-            combined_text += "---" + "\n\n"
-    return combined_text
-
-
-# ============ OPENAI PROCESSING ============
+def process_single_document(file: Path, verbosity: int = 1) -> str:
+    """Process a single document and return its extracted text."""
+    ext = file.suffix.lower()
+    if ext == ".pdf":
+        logging.info(f"Processing PDF: {file.name}")
+        return f"PDF: {file.name}\n---\n{extract_text_from_pdf(file)}\n\n"
+    elif ext == ".pptx":
+        logging.info(f"Processing PPTX: {file.name}")
+        return f"PPTX: {file.name}\n---\n{extract_text_from_pptx(file)}\n\n"
+    elif ext == ".mp4":
+        logging.info(f"Processing MP4: {file.name}")
+        return f"MP4: {file.name}\n---\n{transcribe_audio_with_whisper(file, verbosity)}\n\n"
+    return ""
 
 
 def query_openai_for_topics(text: str, verbosity: int = 1) -> str:
     logging.info("Asking OpenAI for structured topics...")
 
     # Get the path to the system prompt file relative to the script
-    script_dir = Path(__file__).parent
+    script_path = Path(__file__).resolve()
+    script_dir = script_path.parent
     system_prompt_path = script_dir / "system_prompt.txt"
 
+    logging.debug(f"Looking for system prompt at: {system_prompt_path}")
+
     if not system_prompt_path.exists():
+        logging.error(f"System prompt file not found at {system_prompt_path}")
+        logging.error(f"Current working directory: {Path.cwd()}")
         raise FileNotFoundError(f"System prompt file not found at {system_prompt_path}")
 
     with open(system_prompt_path, "r") as f:
@@ -202,7 +197,201 @@ def query_openai_for_topics(text: str, verbosity: int = 1) -> str:
     if verbosity >= 2:
         logging.debug(f"Raw OpenAI response:\n{response}")
 
-    return response.choices[0].message.content
+    topics = response.choices[0].message.content
+    logging.debug(f"Topics response:\n{topics}")
+    return topics
+
+
+def calculate_token_cost(
+    model: str, prompt_tokens: int, completion_tokens: int
+) -> float:
+    """Calculate the cost of an API call based on token usage."""
+    # Current OpenAI pricing (as of 2024)
+    PRICING = {
+        "gpt-4": {
+            "input": 0.03 / 1000,  # $0.03 per 1K tokens
+            "output": 0.06 / 1000,  # $0.06 per 1K tokens
+        },
+        "gpt-3.5-turbo": {
+            "input": 0.001 / 1000,  # $0.001 per 1K tokens
+            "output": 0.002 / 1000,  # $0.002 per 1K tokens
+        },
+    }
+
+    if model not in PRICING:
+        return 0.0
+
+    input_cost = prompt_tokens * PRICING[model]["input"]
+    output_cost = completion_tokens * PRICING[model]["output"]
+    return input_cost + output_cost
+
+
+def summarize_with_gpt35(text: str, verbosity: int = 1) -> tuple[str, float]:
+    """Summarize text using GPT-3.5-turbo to reduce token usage."""
+    logging.info("Summarizing with GPT-3.5-turbo...")
+
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a helpful assistant that creates concise summaries of educational content. Focus on key concepts and main points.",
+            },
+            {
+                "role": "user",
+                "content": f"Please provide a concise summary of the following content, focusing on key concepts and main points:\n\n{text}",
+            },
+        ],
+        temperature=0.3,
+        max_tokens=1000,
+    )
+
+    # Calculate cost
+    prompt_tokens = response.usage.prompt_tokens
+    completion_tokens = response.usage.completion_tokens
+    cost = calculate_token_cost("gpt-3.5-turbo", prompt_tokens, completion_tokens)
+
+    if verbosity >= 1:
+        logging.info(
+            f"GPT-3.5-turbo usage: {prompt_tokens} prompt tokens, {completion_tokens} completion tokens"
+        )
+        logging.info(f"Cost: ${cost:.4f}")
+
+    summary = response.choices[0].message.content
+    if verbosity >= 2:
+        logging.debug(f"Summary:\n{summary}")
+    return summary, cost
+
+
+def chunk_text_with_overlap(
+    text: str, max_tokens: int = 4000, overlap_paragraphs: int = 5
+) -> list[str]:
+    """Split text into chunks with optimal overlap to maintain context."""
+    # Rough estimate: 1 token ≈ 4 characters
+    max_chars = max_tokens * 4
+
+    # Split by paragraphs first
+    paragraphs = text.split("\n\n")
+    chunks = []
+    current_chunk = []
+    current_length = 0
+    overlap_buffer = []
+
+    for para in paragraphs:
+        para_length = len(para)
+
+        # If adding this paragraph would exceed the limit
+        if current_length + para_length > max_chars:
+            # Save current chunk
+            if current_chunk:
+                chunks.append("\n\n".join(current_chunk))
+
+            # Start new chunk with optimal overlap
+            current_chunk = overlap_buffer + [para]
+            current_length = (
+                sum(len(p) for p in current_chunk) + (len(current_chunk) - 1) * 2
+            )
+
+            # Update overlap buffer with optimal number of paragraphs
+            overlap_buffer = current_chunk[-overlap_paragraphs:]
+        else:
+            current_chunk.append(para)
+            current_length += para_length + 2
+            if len(current_chunk) > overlap_paragraphs:
+                overlap_buffer = current_chunk[-overlap_paragraphs:]
+
+    # Add the last chunk if it's not empty
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    return chunks
+
+
+def process_document_chunks(text: str, verbosity: int = 1) -> tuple[str, float]:
+    """Process a document's text in chunks with summarization."""
+    total_cost = 0.0
+
+    # First pass: Split into chunks with optimal overlap
+    chunks = chunk_text_with_overlap(text)
+    logging.info(f"Split document into {len(chunks)} chunks for processing")
+
+    # Second pass: Summarize each chunk with GPT-3.5-turbo
+    summaries = []
+    for i, chunk in enumerate(chunks, 1):
+        logging.info(f"Summarizing chunk {i}/{len(chunks)} with GPT-3.5-turbo")
+        try:
+            summary, cost = summarize_with_gpt35(chunk, verbosity)
+            total_cost += cost
+            summaries.append(summary)
+        except Exception as e:
+            logging.error(f"Error summarizing chunk {i}: {e}")
+            continue
+
+    # Combine summaries and get final topics with GPT-4
+    combined_summary = "\n\n".join(summaries)
+    logging.info("Generating final topics with GPT-4")
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that creates structured notes from educational content.",
+                },
+                {
+                    "role": "user",
+                    "content": f"Given the following summaries, create a structured list of topics and their content:\n\n{combined_summary}",
+                },
+            ],
+            temperature=0.4,
+        )
+
+        # Calculate GPT-4 cost
+        prompt_tokens = response.usage.prompt_tokens
+        completion_tokens = response.usage.completion_tokens
+        gpt4_cost = calculate_token_cost("gpt-4", prompt_tokens, completion_tokens)
+        total_cost += gpt4_cost
+
+        if verbosity >= 1:
+            logging.info(
+                f"GPT-4 usage: {prompt_tokens} prompt tokens, {completion_tokens} completion tokens"
+            )
+            logging.info(f"Cost: ${gpt4_cost:.4f}")
+            logging.info(f"Total cost for document: ${total_cost:.4f}")
+
+        return response.choices[0].message.content, total_cost
+    except Exception as e:
+        logging.error(f"Error generating final topics: {e}")
+        return "", total_cost
+
+
+def combine_inputs_to_text(resource_folder: Path, verbosity: int = 1) -> str:
+    """Process each document separately and combine the results."""
+    combined_text = ""
+    total_cost = 0.0
+
+    for file in resource_folder.iterdir():
+        if file.suffix.lower() in [".pdf", ".pptx", ".mp4"]:
+            try:
+                # Process each document separately
+                doc_text = process_single_document(file, verbosity)
+                if doc_text:
+                    # Process the document in chunks with summarization
+                    topics, cost = process_document_chunks(doc_text, verbosity)
+                    total_cost += cost
+                    combined_text += f"Document: {file.name}\n"
+                    combined_text += topics + "\n\n"
+            except Exception as e:
+                logging.error(f"Error processing {file.name}: {e}")
+                continue
+
+    if verbosity >= 1:
+        logging.info(f"Total processing cost: ${total_cost:.4f}")
+
+    return combined_text
+
+
+# ============ OPENAI PROCESSING ============
 
 
 # ============ NOTE CREATION ============
@@ -234,6 +423,7 @@ def create_obsidian_notes(
 ) -> None:
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
+    logging.debug(f"Output directory: {output_dir}")
 
     # Find Obsidian vault root and generate tag path
     vault_root = find_obsidian_vault_root(output_dir)
@@ -242,18 +432,21 @@ def create_obsidian_notes(
     if tag_path:
         base_tags.append(tag_path)
     tags_str = ", ".join(base_tags)
+    logging.debug(f"Tags: {tags_str}")
 
     # Split the topics string into individual files
     files_combined = topics.split("---")
-    logging.debug(files_combined)
+    logging.debug(f"Number of topic sections: {len(files_combined)}")
     files = []
     i = 0
     while i < len(files_combined) - 1:
         file_name = files_combined[i]
         if not file_name:
+            i += 1
             continue
         file_content = files_combined[i + 1]
         if not file_content:
+            i += 1
             continue
 
         file_name = "".join(c for c in file_name if c.isalnum() or c in "._-")
@@ -265,8 +458,10 @@ def create_obsidian_notes(
             # Add .md extension if no extension exists
             file_name += ".md"
         files.append((file_name, file_content))
+        logging.debug(f"Prepared file: {file_name}")
         i += 2
 
+    logging.debug(f"Total files to create: {len(files)}")
     for filename, content in files:
         if interactive:
             print(f"\nFile to be created: {filename}")
@@ -283,6 +478,8 @@ def create_obsidian_notes(
                     return
                 else:
                     print("Invalid input. Please enter y, n, or a.")
+        else:
+            logging.info(f"Creating file: {filename}")
 
         # Create the file with YAML frontmatter
         filepath = output_dir / filename
@@ -297,6 +494,7 @@ def create_obsidian_notes(
             logging.info(f"Created: {filepath.name}")
         except Exception as e:
             logging.error(f"Error creating file {filepath.name}: {e}")
+            logging.error(f"Error details: {str(e)}")
 
 
 # ============ MAIN ============
@@ -348,8 +546,16 @@ def main():
     # Check dependencies first
     check_dependencies()
 
-    root_path = Path(args.lecture_dir).expanduser().resolve()
-    resource_path = root_path / "Learning Resources"
+    # Handle the lecture directory path
+    try:
+        # First expand any ~ or environment variables
+        expanded_path = os.path.expandvars(os.path.expanduser(args.lecture_dir))
+        # Then resolve to absolute path
+        root_path = Path(expanded_path).resolve()
+        resource_path = root_path / "Learning Resources"
+    except Exception as e:
+        logging.error(f"Error processing path '{args.lecture_dir}': {e}")
+        sys.exit(1)
 
     if not resource_path.exists():
         logging.error(f"{resource_path} does not exist.")
@@ -368,15 +574,8 @@ def main():
         logging.error(f"Error writing extracted text: {e}")
         sys.exit(1)
 
-    logging.info("Sending data to OpenAI...")
-    try:
-        topics = query_openai_for_topics(all_text, args.verbosity)
-    except Exception as e:
-        logging.error(f"Error processing with OpenAI: {e}")
-        sys.exit(1)
-
     logging.info(f"Creating notes in: {root_path}")
-    create_obsidian_notes(topics, root_path, args.interactive)
+    create_obsidian_notes(all_text, root_path, args.interactive)
 
     logging.info("Done!")
 
