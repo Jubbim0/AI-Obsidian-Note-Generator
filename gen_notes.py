@@ -95,10 +95,14 @@ def extract_text_from_pptx(pptx_path: Path) -> str:
         return ""
 
 
-def transcribe_audio_with_whisper(mp4_path: Path) -> str:
+def transcribe_audio_with_whisper(mp4_path: Path, verbosity: int = 1) -> str:
     try:
         logging.info(f"Transcribing {mp4_path.name} using Whisper...")
-        subprocess.run(
+
+        # Capture output if verbosity is not 2
+        capture_output = verbosity < 2
+
+        result = subprocess.run(
             [
                 "whisper",
                 str(mp4_path),
@@ -110,7 +114,14 @@ def transcribe_audio_with_whisper(mp4_path: Path) -> str:
                 "txt",
             ],
             check=True,
+            capture_output=capture_output,
+            text=True,
         )
+
+        # If we captured output and verbosity is 2, print it
+        if capture_output and verbosity >= 2:
+            print(result.stdout)
+
         transcript_file = mp4_path.with_suffix(".txt")
         return transcript_file.read_text() if transcript_file.exists() else ""
     except subprocess.CalledProcessError as e:
@@ -124,7 +135,7 @@ def transcribe_audio_with_whisper(mp4_path: Path) -> str:
 # ============ TEXT COMBINATION ============
 
 
-def combine_inputs_to_text(resource_folder: Path) -> str:
+def combine_inputs_to_text(resource_folder: Path, verbosity: int = 1) -> str:
     combined_text = ""
     for file in resource_folder.iterdir():
         ext = file.suffix.lower()
@@ -141,7 +152,7 @@ def combine_inputs_to_text(resource_folder: Path) -> str:
         elif ext == ".mp4":
             logging.info(f"Processing MP4: {file.name}")
             combined_text += f"MP4: {file.name}\n---\n"
-            combined_text += transcribe_audio_with_whisper(file) + "\n\n"
+            combined_text += transcribe_audio_with_whisper(file, verbosity) + "\n\n"
             combined_text += "---" + "\n\n"
     return combined_text
 
@@ -311,7 +322,7 @@ def main():
         sys.exit(1)
 
     logging.info(f"Extracting data from: {resource_path}")
-    all_text = combine_inputs_to_text(resource_path)
+    all_text = combine_inputs_to_text(resource_path, args.verbosity)
 
     # Write extracted text to a file
     output_file = root_path / "extracted_text.txt"
