@@ -27,29 +27,31 @@ $(VENV_DIR):
 	$(VENV_DIR)/bin/pip install pypdf python-pptx python-dotenv openai
 
 install: check-deps $(VENV_DIR)
-	@echo "Installing gen-notes utilities..."
+	@echo "Installing command-line utilities..."
+	@# Check if aliases already exist
 	@if grep -q "alias gen-notes=" ~/.zshrc; then \
-		echo "gen-notes alias already exists, skipping..."; \
-	else \
-		echo 'alias gen-notes="source $(VENV_DIR)/bin/activate && $(PYTHON) \"$(REPO_DIR)/gen_notes.py\" \"\$$@\""' >> ~/.zshrc; \
+		echo "Alias 'gen-notes' already exists in ~/.zshrc"; \
+		exit 1; \
 	fi
 	@if grep -q "gen-notes-concur()" ~/.zshrc; then \
-		echo "gen-notes-concur function already exists, skipping..."; \
-	else \
-		echo 'gen-notes-concur() { printf "%s\n" "$$@" | xargs -n1 -P$$(sysctl -n hw.ncpu) -I{} gen-notes {} }' >> ~/.zshrc; \
+		echo "Function 'gen-notes-concur' already exists in ~/.zshrc"; \
+		exit 1; \
 	fi
-	@echo "Reloading shell configuration..."
-	@source ~/.zshrc
-	@echo "Installation complete! You can now use:"
-	@echo "  gen-notes <lecture_dir> [options]"
-	@echo "  gen-notes-concur <lecture_dir1> <lecture_dir2> ..."
+	@# Add aliases with proper quoting for paths with spaces
+	@echo 'alias gen-notes="source ~/.gen-notes-venv/bin/activate && python3 \"'$(REPO_DIR)'/gen_notes.py\" \"\$$@\""' >> ~/.zshrc
+	@echo 'gen-notes-concur() { for dir in "$$@"; do gen-notes "$$dir" & done; wait; }' >> ~/.zshrc
+	@echo "Installation complete! Please restart your shell or run 'source ~/.zshrc'"
 
 uninstall:
 	@echo "Removing gen-notes utilities..."
-	@sed -i '' '/alias gen-notes=/d' ~/.zshrc
-	@sed -i '' '/gen-notes-concur()/d' ~/.zshrc
-	@echo "Reloading shell configuration..."
-	@source ~/.zshrc
+	@if [ -f ~/.zshrc ]; then \
+		sed -i '' '/alias gen-notes=/d' ~/.zshrc; \
+		sed -i '' '/gen-notes-concur()/d' ~/.zshrc; \
+		echo "Aliases removed from ~/.zshrc"; \
+		echo "Please restart your shell or run 'source ~/.zshrc' to apply changes"; \
+	else \
+		echo "Warning: ~/.zshrc not found or not a regular file"; \
+	fi
 	@echo "Utilities removed"
 
 clean:
