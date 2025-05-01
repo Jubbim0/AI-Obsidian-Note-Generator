@@ -10,6 +10,9 @@ A Python script that automatically generates structured notes from various learn
 - Processes content using OpenAI's GPT-4
 - Creates structured markdown notes
 - Handles multiple file types in a single run
+- Configurable verbosity levels
+- Optional logging to file
+- Interactive file creation mode
 
 ## Installation
 
@@ -21,7 +24,7 @@ cd ai_note_workflow
 
 2. Install the required dependencies:
 ```bash
-pip install PyPDF2 python-pptx python-dotenv openai
+pip install pypdf python-pptx python-dotenv openai
 ```
 
 3. Install Whisper for audio transcription:
@@ -50,15 +53,72 @@ Lecture_Name/
     └── video.mp4
 ```
 
-2. Run the script:
+2. Run the script with optional flags:
+```bash
+python gen_notes.py /path/to/Lecture_Name [options]
+```
+
+### Command Line Options
+
+- `-v0`: Silent mode - only outputs errors
+- `-v1`: Basic progress output (default)
+- `-v2`: Detailed output including system prompt and raw responses
+- `-l <filename>`: Write all output to specified log file
+- `-i`: Interactive mode for file creation
+
+### Interactive Mode
+
+When using the `-i` flag, the script will prompt you before creating each file:
+- `y`: Create the file
+- `n`: Skip this file
+- `a`: Abort all remaining file creation
+
+### Examples
+
+Basic usage:
 ```bash
 python gen_notes.py /path/to/Lecture_Name
 ```
 
-The script will:
-1. Extract text from all supported files in the "Learning Resources" directory
-2. Process the content using GPT-4
-3. Create structured markdown notes in the lecture directory
+Silent mode with logging:
+```bash
+python gen_notes.py /path/to/Lecture_Name -v0 -l output.log
+```
+
+Interactive mode with detailed output:
+```bash
+python gen_notes.py /path/to/Lecture_Name -v2 -i
+```
+
+## Testing
+
+1. Install test dependencies:
+```bash
+pip install -r requirements-test.txt
+```
+
+2. Run the tests:
+```bash
+# Run all tests
+pytest tests/
+
+# Run tests with coverage report
+pytest --cov=gen_notes tests/
+
+# Run specific test
+pytest tests/test_gen_notes.py::test_name
+
+# Run with verbose output
+pytest -v tests/
+```
+
+The test suite includes:
+- PDF text extraction tests
+- PowerPoint text extraction tests
+- Text combination tests
+- Note creation tests
+- Logging setup tests
+- Error handling tests
 
 ## Supported File Types
 
@@ -71,6 +131,7 @@ The script will:
 The script generates:
 1. An `extracted_text.txt` file containing all extracted content
 2. Individual markdown files for each topic identified by GPT-4
+3. Optional log file if `-l` flag is used
 
 ## Error Handling
 
