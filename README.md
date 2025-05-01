@@ -7,12 +7,14 @@ A Python script that automatically generates structured notes from various learn
 - Extracts text from PDF files
 - Extracts text from PowerPoint presentations
 - Transcribes audio from video files using Whisper
-- Processes content using OpenAI's GPT-4
+- Processes content using OpenAI's GPT-4 and GPT-3.5-turbo
 - Creates structured markdown notes
 - Handles multiple file types in a single run
 - Configurable verbosity levels
 - Optional logging to file
 - Interactive file creation mode
+- Cost-optimized processing with detailed cost tracking
+- Smart content chunking with context preservation
 
 # Manual Installation
 
@@ -49,7 +51,7 @@ deactivate
 ```bash
 # Add these lines to your ~/.zshrc file
 echo 'alias gen-notes="source ~/.gen-notes-venv/bin/activate && python3 \"'$(pwd)'/gen_notes.py\" \"\$@\""' >> ~/.zshrc
-echo 'gen-notes-concur() { printf "%s\n" "$@" | xargs -n1 -P$(sysctl -n hw.ncpu) -I{} gen-notes {} }' >> ~/.zshrc
+echo 'gen-notes-concur() { for dir in "$@"; do gen-notes "$dir" & done; wait; }' >> ~/.zshrc
 
 # Reload your shell configuration
 source ~/.zshrc
@@ -57,16 +59,16 @@ source ~/.zshrc
 
 5. Verify the installation:
 ```bash
-# Test the gen-notes command
-gen-notes --help
+# Test the gen-notes command with a path containing spaces
+gen-notes "/path/to/My Lecture Notes"
 
-# Test the concurrent version
-gen-notes-concur --help
+# Test the concurrent version with multiple paths
+gen-notes-concur "/path/to/Lecture 1" "/path/to/Lecture 2"
 ```
 
 The commands will now be available in your shell:
-- `gen-notes <lecture_dir> [options]` for single directory processing
-- `gen-notes-concur <lecture_dir1> <lecture_dir2> ...` for concurrent processing of multiple directories
+- `gen-notes "<lecture_dir>" [options]` for single directory processing
+- `gen-notes-concur "<lecture_dir1>" "<lecture_dir2>" ...` for concurrent processing of multiple directories
 
 To remove the utilities:
 ```bash
@@ -120,7 +122,7 @@ After installation, you can use:
 
 1. Create a directory structure for your lecture:
 ```
-Lecture_Name/
+Lecture Name/  # Note: Spaces in directory names are supported
 └── Learning Resources/
     ├── lecture.pdf
     ├── slides.pptx
@@ -129,39 +131,65 @@ Lecture_Name/
 
 2. Run the script with optional flags:
 ```bash
-python gen_notes.py /path/to/Lecture_Name [options]
+# Basic usage
+python gen_notes.py "/path/to/Lecture Name"
+
+# Using quotes for paths with spaces
+python gen_notes.py "/path/to/My Lecture Notes"
+
+# Using environment variables
+python gen_notes.py "$HOME/Documents/My Lectures"
+
+# Using relative paths
+python gen_notes.py "./My Lecture Notes"
 ```
+
+### Path Handling
+- The script supports paths with spaces when properly quoted
+- Environment variables (like `$HOME`) are expanded
+- Tilde expansion (`~`) is supported
+- Both absolute and relative paths work
+- Paths are automatically resolved to their absolute form
 
 ### Command Line Options
 
 - `-v0`: Silent mode - only outputs errors
 - `-v1`: Basic progress output (default)
-- `-v2`: Detailed output including system prompt and raw responses
-- `-l <filename>`: Write all output to specified log file
-- `-i`: Interactive mode for file creation
+- `-v2`: Detailed output including system prompt, raw responses, and cost tracking
 
-### Interactive Mode
+### Cost Optimization
+The script uses a cost-optimized approach:
+1. Content is split into manageable chunks with optimal overlap
+2. Each chunk is summarized using GPT-3.5-turbo (lower cost)
+3. Summaries are combined and processed by GPT-4 for final topic generation
+4. Detailed cost tracking shows:
+   - Token usage per API call
+   - Cost per model (GPT-3.5-turbo and GPT-4)
+   - Total cost per document
+   - Overall processing cost
 
-When using the `-i` flag, the script will prompt you before creating each file:
-- `y`: Create the file
-- `n`: Skip this file
-- `a`: Abort all remaining file creation
+### Content Processing
+- Large documents are automatically split into chunks
+- Chunks overlap by 5 paragraphs to maintain context
+- Each chunk is processed independently
+- Results are combined for coherent output
+- Error handling at chunk level ensures partial success
 
 ### Examples
 
 Basic usage:
 ```bash
-python gen_notes.py /path/to/Lecture_Name
+python gen_notes.py "/path/to/Lecture Name"
 ```
 
-Silent mode with logging:
+Detailed output with cost tracking:
 ```bash
-python gen_notes.py /path/to/Lecture_Name -v0 -l output.log
+python gen_notes.py "/path/to/Lecture Name" -v2
 ```
 
 Interactive mode with detailed output:
 ```bash
-python gen_notes.py /path/to/Lecture_Name -v2 -i
+python gen_notes.py "/path/to/Lecture Name" -v2 -i
 ```
 
 ## Testing
