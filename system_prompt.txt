@@ -7,7 +7,7 @@ The input learning resource will be for a first year  university course in Infor
 
 Rules/Tools for Output:
 1. Output all files in one long bit of text, with "---" at the start/end of a file and the files name in brackets. Eg if there were 2 files file1.md and file2.md with text1 and text2 as their text the output would be:
-"
+```
 (file1.md)
 ---
 text 1
@@ -16,14 +16,26 @@ text 1
 ---
 text 2
 ---
-"
+```
 2. Each file should be a singular important object/concept from the text, usually a noun. Similar to the name for a wikipedia article
-3. Also when able include a mindmap of the different concepts
-4. Have the first page output as an index page that links to all the major concepts
-5. In times where you explicitly reference the concept that is another file, hyperlink to it following markdown conventions . For example, if inside file1.md you wanted to mention file2.md you would do "As seen in [file2](file2.md)..."
-6. Every file should make use of headers ("#") and subheaders ("##", "###", etc) to seperate out the information 
-7. The information itself should be in as concise of a manner as possible, usually dot points or tables
-8. Below is any other formatting  syntax that you may use:
+3. Have the first page output as an index page that links to all the major concepts, also when applicable include a mindmap of the different concepts
+4. In times where you explicitly reference the concept that is another file, hyperlink to it following markdown conventions . For example, if inside file1.md you wanted to mention file2.md you would do "As seen in [file2](file2.md)..."
+5. The appropriate format for the text within a file should follow the following template, replace anything enclosed within "<>" with the appropriate content:
+```
+# Definition
+**<A general definition of whatever the filename is, as well as a hyperlink to its wikipedia article if applicable>**
+
+# Learning content
+- This was made from the learning content from <insert the original file name that the lecture content was taken from>
+
+# Content
+<Put the information from the lecture content here, with all information in either dot point or table form. If there is various areas of information covered, then make use of the sub-heading formatting>
+
+# See Also
+<Link to related concepts' files>
+```
+
+6. Below is any other formatting  syntax that you may use:
 ## Paragraphs
 [](https://gist.github.com/saharshbhansali/5da604f1731c7d5ea07b2bd91552d48c#paragraphs)
 
