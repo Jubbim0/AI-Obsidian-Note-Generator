@@ -14,7 +14,7 @@ A Python script that automatically generates structured notes from various learn
 - Optional logging to file
 - Interactive file creation mode
 
-## Installation
+# Manual Installation
 
 1. Clone this repository:
 ```bash
@@ -22,27 +22,101 @@ git clone https://github.com/Jubbim0/ai_note_workflow.git
 cd ai_note_workflow
 ```
 
-2. Install the required dependencies:
-```bash
-pip install pypdf python-pptx python-dotenv openai
-```
-
-3. Install Whisper for audio transcription:
-```bash
-pip install git+https://github.com/openai/whisper.git
-```
-
-## Environment Setup
-
-1. Create a `.env` file in the project root directory
-2. Add your OpenAI API key:
+2. Create a `.env` file in the project root directory, and Add your OpenAI API key (You can get an API key from [OpenAI's platform](https://platform.openai.com/api-keys).):
 ```
 OPENAI_API_KEY=your-api-key-here
 ```
 
-You can get an API key from [OpenAI's platform](https://platform.openai.com/api-keys).
+3. Create and configure a Python virtual environment:
+```bash
+# Create a virtual environment in your home directory
+python3 -m venv ~/.gen-notes-venv
 
-## Usage
+# Activate the virtual environment
+source ~/.gen-notes-venv/bin/activate
+
+# Install the required dependencies
+pip install pypdf python-pptx python-dotenv openai
+
+# Install Whisper for audio transcription
+pip install git+https://github.com/openai/whisper.git
+
+# Deactivate the virtual environment when done
+deactivate
+```
+
+4. Add the command-line utilities to your shell:
+```bash
+# Add these lines to your ~/.zshrc file
+echo 'alias gen-notes="source ~/.gen-notes-venv/bin/activate && python3 \"'$(pwd)'/gen_notes.py\" \"\$@\""' >> ~/.zshrc
+echo 'gen-notes-concur() { printf "%s\n" "$@" | xargs -n1 -P$(sysctl -n hw.ncpu) -I{} gen-notes {} }' >> ~/.zshrc
+
+# Reload your shell configuration
+source ~/.zshrc
+```
+
+5. Verify the installation:
+```bash
+# Test the gen-notes command
+gen-notes --help
+
+# Test the concurrent version
+gen-notes-concur --help
+```
+
+The commands will now be available in your shell:
+- `gen-notes <lecture_dir> [options]` for single directory processing
+- `gen-notes-concur <lecture_dir1> <lecture_dir2> ...` for concurrent processing of multiple directories
+
+To remove the utilities:
+```bash
+# Remove the aliases from your ~/.zshrc
+sed -i '' '/alias gen-notes=/d' ~/.zshrc
+sed -i '' '/gen-notes-concur()/d' ~/.zshrc
+
+# Remove the virtual environment
+rm -rf ~/.gen-notes-venv
+
+# Reload your shell configuration
+source ~/.zshrc
+```
+
+# Quick Installation
+1. Clone this repository:
+```bash
+git clone https://github.com/Jubbim0/ai_note_workflow.git
+cd ai_note_workflow
+```
+
+2. Create a `.env` file in the project root directory, and Add your OpenAI API key (You can get an API key from [OpenAI's platform](https://platform.openai.com/api-keys).):
+```
+OPENAI_API_KEY=your-api-key-here
+```
+
+After cloning the repository, you can install the command-line utilities using the provided Makefile:
+```bash
+# Install the utilities
+make install
+
+# To remove the utilities
+make uninstall
+
+# To clean up (remove virtual environment)
+make clean
+```
+
+Running `make install` will:
+1. Check for required dependencies
+2. Create a Python virtual environment
+3. Install all required packages
+4. Add the `gen-notes` and `gen-notes-concur` commands to your shell
+5. Configure everything to work with paths containing spaces and special characters
+
+After installation, you can use:
+- `gen-notes <lecture_dir> [options]` for single directory processing
+- `gen-notes-concur <lecture_dir1> <lecture_dir2> ...` for concurrent processing of multiple directories
+
+# Usage
 
 1. Create a directory structure for your lecture:
 ```

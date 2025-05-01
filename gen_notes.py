@@ -208,11 +208,40 @@ def query_openai_for_topics(text: str, verbosity: int = 1) -> str:
 # ============ NOTE CREATION ============
 
 
+def find_obsidian_vault_root(path: Path) -> Path:
+    """Find the Obsidian vault root directory by looking for .obsidian/ directory."""
+    current = path
+    while current != current.parent:  # Stop at root directory
+        if (current / ".obsidian").exists():
+            return current
+        current = current.parent
+    return None
+
+
+def generate_tag_path(vault_root: Path, current_path: Path) -> str:
+    """Generate the tag path from vault root to current directory."""
+    if not vault_root:
+        return ""
+    # Get relative path from vault root
+    rel_path = current_path.relative_to(vault_root)
+    # Convert to string and remove whitespace
+    tag_path = str(rel_path).replace(" ", "")
+    return tag_path
+
+
 def create_obsidian_notes(
     topics: str, output_dir: Path, interactive: bool = False
 ) -> None:
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Find Obsidian vault root and generate tag path
+    vault_root = find_obsidian_vault_root(output_dir)
+    tag_path = generate_tag_path(vault_root, output_dir)
+    base_tags = ["todo"]
+    if tag_path:
+        base_tags.append(tag_path)
+    tags_str = ", ".join(base_tags)
 
     # Split the topics string into individual files
     files_combined = topics.split("---")
@@ -241,7 +270,7 @@ def create_obsidian_notes(
     for filename, content in files:
         if interactive:
             print(f"\nFile to be created: {filename}")
-            print(f"Content preview:\n{content[:200]}...")  # Show first 200 chars
+            print(f"Content preview:\n{content}...")  # Show first 200 chars
             while True:
                 response = input("Create this file? (y/n/a): ").lower()
                 if response == "y":
@@ -255,10 +284,15 @@ def create_obsidian_notes(
                 else:
                     print("Invalid input. Please enter y, n, or a.")
 
-        # Create the file
+        # Create the file with YAML frontmatter
         filepath = output_dir / filename
         try:
             with open(filepath, "w", encoding="utf-8") as f:
+                # Write YAML frontmatter
+                f.write("---\n")
+                f.write(f"tags: {tags_str}\n")
+                f.write("---\n\n")
+                # Write content
                 f.write(content)
             logging.info(f"Created: {filepath.name}")
         except Exception as e:

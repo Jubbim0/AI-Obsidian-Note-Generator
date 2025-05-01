@@ -17,6 +17,8 @@ from gen_notes import (
     create_obsidian_notes,
     setup_logging,
     main,
+    find_obsidian_vault_root,
+    generate_tag_path,
 )
 
 
@@ -190,3 +192,102 @@ def test_main_invalid_directory():
     with patch("sys.argv", ["gen_notes.py", "/nonexistent/directory"]):
         with pytest.raises(SystemExit):
             main()
+
+
+def test_find_obsidian_vault_root(tmp_path):
+    """Test finding Obsidian vault root directory."""
+    # Create a nested directory structure
+    root = tmp_path / "vault"
+    subdir = root / "subdir" / "notes"
+    subdir.mkdir(parents=True)
+
+    # Test when .obsidian exists in root
+    (root / ".obsidian").mkdir()
+    assert find_obsidian_vault_root(subdir) == root
+
+    # Test when .obsidian exists in subdir
+    (subdir / ".obsidian").mkdir()
+    assert find_obsidian_vault_root(subdir) == subdir
+
+    # Test when no .obsidian exists
+    (root / ".obsidian").rmdir()
+    (subdir / ".obsidian").rmdir()
+    assert find_obsidian_vault_root(subdir) is None
+
+
+def test_generate_tag_path(tmp_path):
+    """Test generating tag path from vault root."""
+    # Create a nested directory structure
+    root = tmp_path / "vault"
+    subdir = root / "subdir" / "notes"
+    subdir.mkdir(parents=True)
+
+    # Test with spaces in path
+    assert generate_tag_path(root, subdir) == "subdir/notes"
+
+    # Test with no vault root
+    assert generate_tag_path(None, subdir) == ""
+
+    # Test with spaces in directory names
+    spaced_dir = root / "Course Work" / "Week 7"
+    spaced_dir.mkdir(parents=True)
+    assert generate_tag_path(root, spaced_dir) == "CourseWork/Week7"
+
+
+def test_create_obsidian_notes_with_frontmatter(tmp_path):
+    """Test creating notes with YAML frontmatter."""
+    # Create a nested directory structure with .obsidian
+    root = tmp_path / "vault"
+    subdir = root / "Course Work" / "Week 7"
+    subdir.mkdir(parents=True)
+    (root / ".obsidian").mkdir()
+
+    # Create test topics
+    topics = "Test Note 1\n---\nContent 1\n---\nTest Note 2\n---\nContent 2"
+
+    # Create notes
+    create_obsidian_notes(topics, subdir)
+
+    # Check created files
+    note1 = subdir / "TestNote1.md"
+    note2 = subdir / "TestNote2.md"
+
+    assert note1.exists()
+    assert note2.exists()
+
+    # Check YAML frontmatter
+    with open(note1, "r") as f:
+        content = f.read()
+        assert "---" in content
+        assert "tags: todo, CourseWork/Week7" in content
+        assert "Content 1" in content
+
+    with open(note2, "r") as f:
+        content = f.read()
+        assert "---" in content
+        assert "tags: todo, CourseWork/Week7" in content
+        assert "Content 2" in content
+
+
+def test_create_obsidian_notes_no_vault_root(tmp_path):
+    """Test creating notes when no Obsidian vault root is found."""
+    # Create a directory without .obsidian
+    subdir = tmp_path / "notes"
+    subdir.mkdir()
+
+    # Create test topics
+    topics = "Test Note\n---\nContent"
+
+    # Create notes
+    create_obsidian_notes(topics, subdir)
+
+    # Check created file
+    note = subdir / "TestNote.md"
+    assert note.exists()
+
+    # Check YAML frontmatter (should only have todo tag)
+    with open(note, "r") as f:
+        content = f.read()
+        assert "---" in content
+        assert "tags: todo" in content
+        assert "Content" in content
