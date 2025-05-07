@@ -5,16 +5,17 @@ A Python script that automatically generates structured notes from various learn
 ## Features
 
 - Extracts text from PDF files
-- Extracts text from PowerPoint presentations
+- Extracts text from PowerPoint presentations (.pptx and .ppt)
 - Transcribes audio from video files using Whisper
-- Processes content using OpenAI's GPT-4 and GPT-3.5-turbo
+- Processes content using OpenAI's GPT-4
 - Creates structured markdown notes
 - Handles multiple file types in a single run
 - Configurable verbosity levels
 - Optional logging to file
 - Interactive file creation mode
 - Cost-optimized processing with detailed cost tracking
-- Smart content chunking with context preservation
+- Automatic topic deduplication across multiple resources
+- Context-aware topic generation using existing topics
 
 # Manual Installation
 
@@ -155,25 +156,33 @@ python gen_notes.py "./My Lecture Notes"
 
 - `-v0`: Silent mode - only outputs errors
 - `-v1`: Basic progress output (default)
-- `-v2`: Detailed output including system prompt, raw responses, and cost tracking
+  - Shows chunk processing progress
+  - Displays cost information
+  - Reports duplicate topic merging
+- `-v2`: Detailed output including:
+  - System prompt and raw responses
+  - Cost tracking details
+  - Chunk sizes and overlap information
+  - Topic deduplication details
+  - Content length statistics
 
 ### Cost Optimization
 The script uses a cost-optimized approach:
-1. Content is split into manageable chunks with optimal overlap
-2. Each chunk is summarized using GPT-3.5-turbo (lower cost)
-3. Summaries are combined and processed by GPT-4 for final topic generation
+1. Each document is processed in a single GPT-4 call
+2. Topics are merged automatically to reduce redundancy
+3. Existing topics are considered when generating new topics
 4. Detailed cost tracking shows:
    - Token usage per API call
-   - Cost per model (GPT-3.5-turbo and GPT-4)
-   - Total cost per document
-   - Overall processing cost
+   - Cost per document
+   - Total processing cost
 
 ### Content Processing
-- Large documents are automatically split into chunks
-- Chunks overlap by 5 paragraphs to maintain context
-- Each chunk is processed independently
-- Results are combined for coherent output
-- Error handling at chunk level ensures partial success
+- Each document is processed independently
+- Topics are extracted and merged automatically
+- Error handling ensures partial success
+- Duplicate topics from different resources are automatically merged
+- Content from all sources is preserved in merged topics
+- Existing topics are considered for better topic relationships
 
 ### Examples
 
@@ -225,15 +234,14 @@ The test suite includes:
 ## Supported File Types
 
 - PDF (.pdf)
-- PowerPoint (.pptx)
+- PowerPoint (.pptx, .ppt)
 - Video (.mp4) - requires Whisper for transcription
 
 ## Output
 
 The script generates:
-1. An `extracted_text.txt` file containing all extracted content
-2. Individual markdown files for each topic identified by GPT-4
-3. Optional log file if `-l` flag is used
+1. Individual markdown files for each topic identified by GPT-4
+2. Optional log file if `-l` flag is used
 
 ## Error Handling
 
