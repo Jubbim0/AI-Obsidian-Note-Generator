@@ -178,85 +178,14 @@ class OpenAIHelper:
         output_cost = completion_tokens * self.PRICING[model]["output"]
         return input_cost + output_cost
 
-    def summarize_with_gpt35(self, text: str, verbosity: int = 1) -> tuple[str, float]:
-        """Summarize text using GPT-3.5-turbo to reduce token usage."""
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": self.system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": f"Please provide a concise summary of the following content, focusing on key concepts and main points:\n\n{text}",
-                },
-            ],
-            temperature=0.3,
-            max_tokens=1000,
-        )
-
-        # Calculate cost
-        prompt_tokens = response.usage.prompt_tokens
-        completion_tokens = response.usage.completion_tokens
-        cost = self.calculate_token_cost(
-            "gpt-3.5-turbo", prompt_tokens, completion_tokens
-        )
-
-        summary = response.choices[0].message.content
-        return summary, cost
-
 
 class TextProcessor:
-    """Handles text processing and chunking operations."""
+    """Handles text processing operations."""
 
     def __init__(self, verbosity: int = 1):
         self.verbosity = verbosity
         self.logger = LoggingHelper(verbosity)
         self.openai = OpenAIHelper()
-
-    def chunk_text_with_overlap(
-        self, text: str, max_tokens: int = 4000, overlap_paragraphs: int = 5
-    ) -> list[str]:
-        """Split text into chunks with optimal overlap to maintain context."""
-        # Rough estimate: 1 token ≈ 4 characters
-        max_chars = max_tokens * 4
-
-        # Split by paragraphs first
-        paragraphs = text.split("\n\n")
-        chunks = []
-        current_chunk = []
-        current_length = 0
-        overlap_buffer = []
-
-        for para in paragraphs:
-            para_length = len(para)
-
-            # If adding this paragraph would exceed the limit
-            if current_length + para_length > max_chars:
-                # Save current chunk
-                if current_chunk:
-                    chunks.append("\n\n".join(current_chunk))
-
-                # Start new chunk with optimal overlap
-                current_chunk = overlap_buffer + [para]
-                current_length = (
-                    sum(len(p) for p in current_chunk) + (len(current_chunk) - 1) * 2
-                )
-
-                # Update overlap buffer with optimal number of paragraphs
-                overlap_buffer = current_chunk[-overlap_paragraphs:]
-            else:
-                current_chunk.append(para)
-                current_length += para_length + 2
-                if len(current_chunk) > overlap_paragraphs:
-                    overlap_buffer = current_chunk[-overlap_paragraphs:]
-
-        # Add the last chunk if it's not empty
-        if current_chunk:
-            chunks.append("\n\n".join(current_chunk))
-
-        return chunks
 
 
 class DocumentProcessor:
@@ -270,7 +199,7 @@ class DocumentProcessor:
 
     def process_directory(self, directory: Path) -> Dict:
         """Process all documents in a directory and return combined topics."""
-        all_topics = {}
+        all_topics = {"topics": {}, "associated_topics": {}}
         total_cost = 0.0
 
         for file in directory.iterdir():
@@ -365,21 +294,30 @@ class DocumentProcessor:
         if not new_topics.get("topics"):
             return
 
+        # Ensure all_topics has the required structure
+        if "topics" not in all_topics:
+            all_topics["topics"] = {}
+        if "associated_topics" not in all_topics:
+            all_topics["associated_topics"] = {}
+
+        # Merge topics and subtopics
         for topic, subtopics in new_topics["topics"].items():
-            if topic not in all_topics:
-                all_topics[topic] = subtopics
+            if topic not in all_topics["topics"]:
+                all_topics["topics"][topic] = subtopics
             else:
                 # Merge subtopics
-                self._merge_subtopics(all_topics[topic], subtopics)
+                self._merge_subtopics(all_topics["topics"][topic], subtopics)
 
         # Merge associated topics
         if "associated_topics" in new_topics:
             for topic, associated in new_topics["associated_topics"].items():
-                if topic not in all_topics:
-                    all_topics[topic] = []
-                all_topics[topic].extend(associated)
+                if topic not in all_topics["associated_topics"]:
+                    all_topics["associated_topics"][topic] = []
+                all_topics["associated_topics"][topic].extend(associated)
                 # Remove duplicates while preserving order
-                all_topics[topic] = list(dict.fromkeys(all_topics[topic]))
+                all_topics["associated_topics"][topic] = list(
+                    dict.fromkeys(all_topics["associated_topics"][topic])
+                )
 
     def _merge_subtopics(self, existing: Dict, new: Dict) -> None:
         """Recursively merge subtopics."""
@@ -578,6 +516,7 @@ def generate_tag_path(vault_root: Path, current_path: Path) -> str:
 def create_obsidian_notes(
     topics: str, output_dir: Path, interactive: bool = False
 ) -> None:
+    """Create Obsidian notes from topics dictionary."""
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
     logging.debug(f"Output directory: {output_dir}")
@@ -591,67 +530,59 @@ def create_obsidian_notes(
     tags_str = ", ".join(base_tags)
     logging.debug(f"Tags: {tags_str}")
 
-    # Split the topics string into individual files
-    files_combined = topics.split("---")
-    logging.debug(f"Number of topic sections: {len(files_combined)}")
-    files = []
-    i = 0
-    while i < len(files_combined) - 1:
-        file_name = files_combined[i]
-        if not file_name:
-            i += 1
-            continue
-        file_content = files_combined[i + 1]
-        if not file_content:
-            i += 1
-            continue
-
-        file_name = "".join(c for c in file_name if c.isalnum() or c in "._-")
-        # Check if filename has an extension
-        if "." in file_name:
-            # Replace existing extension with .md
-            file_name = file_name.rsplit(".", 1)[0] + ".md"
-        elif not file_name.endswith(".md"):
-            # Add .md extension if no extension exists
-            file_name += ".md"
-        files.append((file_name, file_content))
-        logging.debug(f"Prepared file: {file_name}")
-        i += 2
-
-    logging.debug(f"Total files to create: {len(files)}")
-    for filename, content in files:
-        if interactive:
-            print(f"\nFile to be created: {filename}")
-            print(f"Content preview:\n{content}...")  # Show first 200 chars
-            while True:
-                response = input("Create this file? (y/n/a): ").lower()
-                if response == "y":
-                    break
-                elif response == "n":
-                    logging.info(f"Skipping file: {filename}")
-                    continue
-                elif response == "a":
-                    logging.info("Aborting all file creation")
-                    return
-                else:
-                    print("Invalid input. Please enter y, n, or a.")
-        else:
-            logging.info(f"Creating file: {filename}")
-
-        # Create the file with YAML frontmatter
-        filepath = output_dir / filename
+    # Parse topics from JSON if it's a string
+    if isinstance(topics, str):
         try:
+            topics_dict = json.loads(topics)
+        except json.JSONDecodeError as e:
+            logging.error(f"Error parsing topics JSON: {e}")
+            return
+    else:
+        topics_dict = topics
+
+    # Create notes for each topic
+    for topic, subtopics in topics_dict["topics"].items():
+        try:
+            # Format filename
+            filename = "".join(c for c in topic if c.isalnum() or c in "._- ")
+            if not filename.endswith(".md"):
+                filename += ".md"
+
+            if interactive:
+                print(f"\nFile to be created: {filename}")
+                while True:
+                    response = input("Create this file? (y/n/a): ").lower()
+                    if response == "y":
+                        break
+                    elif response == "n":
+                        logging.info(f"Skipping file: {filename}")
+                        continue
+                    elif response == "a":
+                        logging.info("Aborting all file creation")
+                        return
+                    else:
+                        print("Invalid input. Please enter y, n, or a.")
+
+            # Create the file
+            filepath = output_dir / filename
             with open(filepath, "w", encoding="utf-8") as f:
                 # Write YAML frontmatter
                 f.write("---\n")
                 f.write(f"tags: {tags_str}\n")
                 f.write("---\n\n")
-                # Write content
+
+                # Format and write content
+                note_formatter = NoteFormatter(verbosity=1)
+                content = note_formatter.format_topic_content(
+                    topic, subtopics, topics_dict["associated_topics"].get(topic, [])
+                )
                 f.write(content)
+
             logging.info(f"Created: {filepath.name}")
         except Exception as e:
-            logging.error(f"Error creating file {filepath.name}: {e}")
+            logging.error(f"Error creating file {filename}: {e}")
             logging.error(f"Error details: {str(e)}")
+            continue
 
 
 # ============ MAIN ============
@@ -684,6 +615,9 @@ def main():
 
     args = parser.parse_args()
     setup_logging(args.verbosity, args.log_file)
+
+    # Check dependencies first
+    check_dependencies()
 
     # Convert to Path object
     resource_path = Path(args.resource_path)
@@ -748,17 +682,31 @@ class NoteFormatter:
     def get_wikipedia_definition(self, topic: str) -> str:
         """Get the definition of a topic from Wikipedia."""
         try:
-            # Format the topic for Wikipedia search
-            search_topic = topic.replace(" ", "_")
-            url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{search_topic}"
-            response = requests.get(url)
-            response.raise_for_status()
-            data = response.json()
-            return data.get("extract", f"*No definition found for {topic}*")
+            # First search for the topic to find the closest match
+            search_url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(topic)}&format=json"
+            search_response = requests.get(search_url)
+            search_response.raise_for_status()
+            search_data = search_response.json()
+
+            # If no search results found, return blank definition
+            if not search_data.get("query", {}).get("search"):
+                return ""
+
+            # Get the title of the closest match
+            closest_match = search_data["query"]["search"][0]["title"]
+
+            # Now get the summary for the closest match
+            summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(closest_match)}"
+            summary_response = requests.get(summary_url)
+            summary_response.raise_for_status()
+            summary_data = summary_response.json()
+
+            return summary_data.get("extract", "")
+
         except Exception as e:
             self.logger.log_subsection("Wikipedia API Error")
             logging.error(f"Error fetching definition for {topic}: {e}")
-            return f"*No definition found for {topic}*"
+            return ""
 
     def format_topic_content(
         self, topic: str, subtopics: Dict, associated_topics: List[str]
@@ -768,17 +716,17 @@ class NoteFormatter:
         definition = self.get_wikipedia_definition(topic)
 
         # Start building the content
-        content = ["# Definition", f"*{definition}*", ""]
+        content = [f"# {topic}", "", "## Definition", f"*{definition}*", ""]
 
         # Add subtopics with proper heading levels
-        self._add_subtopics(content, subtopics, 1)
+        self._add_subtopics(content, subtopics, 2)
 
-        # Add See Also section
+        # Add Related Topics section
         if associated_topics:
             content.extend(
                 [
                     "",
-                    "# See Also",
+                    "## Related Topics",
                     *[
                         f"- [{topic}]({urllib.parse.quote(topic)}.md)"
                         for topic in associated_topics

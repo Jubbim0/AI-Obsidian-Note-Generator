@@ -12,31 +12,32 @@ You must output a JSON object with the following structure:
 ```json
 {
     "topics": {
-        "Main Topic 1": {
+        "Specific Topic 1": {
             "Subtopic 1": {
                 "Nested Subtopic 1": {},
                 "Nested Subtopic 2": {}
             },
             "Subtopic 2": {}
         },
-        "Main Topic 2": {
+        "Specific Topic 2": {
             "Subtopic 3": {}
         }
     },
     "associated_topics": {
-        "Main Topic 1": ["Main Topic 2", "Main Topic 3"],
-        "Main Topic 2": ["Main Topic 1", "Main Topic 4"]
+        "Specific Topic 1": ["Specific Topic 2", "Specific Topic 3"],
+        "Specific Topic 2": ["Specific Topic 1", "Specific Topic 4"]
     }
 }
 ```
 
 # Rules for Topic Extraction
-1. Each main topic should be a significant concept or idea from the content
-2. Topics should be organized hierarchically based on their relationships
-3. Use clear, concise names for topics (similar to Wikipedia article titles)
-4. Avoid duplicate topics at the same level
-5. Ensure proper nesting of related concepts
-6. For each main topic, identify up to 3 most closely related topics from the list
+1. AVOID broad, general topics like "Introduction to X" or "Overview of Y" as main topics
+2. Focus on specific, actionable concepts that can be studied independently
+3. Topics should be organized hierarchically based on their relationships
+4. Use clear, concise names for topics (similar to Wikipedia article titles)
+5. Avoid duplicate topics at the same level
+6. Ensure proper nesting of related concepts
+7. For each main topic, identify up to 3 most closely related topics from the list
 
 # Topic Naming Guidelines
 1. Use singular nouns for main topics
@@ -44,6 +45,8 @@ You must output a JSON object with the following structure:
 3. Avoid overly long names
 4. Use consistent capitalization
 5. Avoid special characters except spaces and hyphens
+6. IMPORTANT: Main topics should be specific concepts, not broad categories or introductions
+7. If you see a topic like "Introduction to X", break it down into its specific components
 
 # Associated Topics Guidelines
 1. When generating associated topics, consider:
@@ -75,21 +78,19 @@ Expected Output:
 ```json
 {
     "topics": {
-        "Machine Learning": {
-            "Definition": {},
-            "Types": {
-                "Supervised Learning": {},
-                "Unsupervised Learning": {}
-            }
-        },
         "Supervised Learning": {
             "Definition": {},
-            "Applications": {}
+            "Applications": {},
+            "Training Process": {}
+        },
+        "Neural Networks": {
+            "Architecture": {},
+            "Training Methods": {}
         }
     },
     "associated_topics": {
-        "Machine Learning": ["Supervised Learning", "Artificial Intelligence"],
-        "Supervised Learning": ["Machine Learning", "Unsupervised Learning"]
+        "Supervised Learning": ["Neural Networks", "Model Evaluation"],
+        "Neural Networks": ["Supervised Learning", "Deep Learning"]
     }
 }
 ```
@@ -118,3 +119,5 @@ Remember:
 4. Keep topic names clear and consistent
 5. Focus on extracting key concepts and their relationships
 6. Consider existing topics when generating associated topics
+7. IMPORTANT: Break down broad topics into specific concepts
+8. Avoid using "Introduction to" or "Overview of" as main topics

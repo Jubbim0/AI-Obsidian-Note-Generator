@@ -1,6 +1,6 @@
 # AI Note Workflow
 
-A Python script that automatically generates structured notes from various learning resources (PDFs, PowerPoint presentations, and video lectures) using OpenAI's GPT-4.
+A Python package that automatically generates structured notes from various learning resources (PDFs, PowerPoint presentations, and video lectures) using OpenAI's GPT-4.
 
 ## Features
 
@@ -38,11 +38,8 @@ python3 -m venv ~/.gen-notes-venv
 # Activate the virtual environment
 source ~/.gen-notes-venv/bin/activate
 
-# Install the required dependencies
-pip install pypdf python-pptx python-dotenv openai
-
-# Install Whisper for audio transcription
-pip install git+https://github.com/openai/whisper.git
+# Install the package in development mode
+pip install -e .
 
 # Deactivate the virtual environment when done
 deactivate
@@ -51,7 +48,7 @@ deactivate
 4. Add the command-line utilities to your shell:
 ```bash
 # Add these lines to your ~/.zshrc file
-echo 'alias gen-notes="source ~/.gen-notes-venv/bin/activate && python3 \"'$(pwd)'/gen_notes.py\" \"\$@\""' >> ~/.zshrc
+echo 'alias gen-notes="source ~/.gen-notes-venv/bin/activate && python3 -m src \"\$@\""' >> ~/.zshrc
 echo 'gen-notes-concur() { for dir in "$@"; do gen-notes "$dir" & done; wait; }' >> ~/.zshrc
 
 # Reload your shell configuration
@@ -133,16 +130,16 @@ Lecture Name/  # Note: Spaces in directory names are supported
 2. Run the script with optional flags:
 ```bash
 # Basic usage
-python gen_notes.py "/path/to/Lecture Name"
+python -m src "/path/to/Lecture Name"
 
 # Using quotes for paths with spaces
-python gen_notes.py "/path/to/My Lecture Notes"
+python -m src "/path/to/My Lecture Notes"
 
 # Using environment variables
-python gen_notes.py "$HOME/Documents/My Lectures"
+python -m src "$HOME/Documents/My Lectures"
 
 # Using relative paths
-python gen_notes.py "./My Lecture Notes"
+python -m src "./My Lecture Notes"
 ```
 
 ### Path Handling
@@ -188,24 +185,24 @@ The script uses a cost-optimized approach:
 
 Basic usage:
 ```bash
-python gen_notes.py "/path/to/Lecture Name"
+python -m src "/path/to/Lecture Name"
 ```
 
 Detailed output with cost tracking:
 ```bash
-python gen_notes.py "/path/to/Lecture Name" -v2
+python -m src "/path/to/Lecture Name" -v2
 ```
 
 Interactive mode with detailed output:
 ```bash
-python gen_notes.py "/path/to/Lecture Name" -v2 -i
+python -m src "/path/to/Lecture Name" -v2 -i
 ```
 
 ## Testing
 
 1. Install test dependencies:
 ```bash
-pip install -r requirements-test.txt
+pip install -e ".[test]"
 ```
 
 2. Run the tests:
@@ -214,7 +211,7 @@ pip install -r requirements-test.txt
 pytest tests/
 
 # Run tests with coverage report
-pytest --cov=gen_notes tests/
+pytest --cov=src tests/
 
 # Run specific test
 pytest tests/test_gen_notes.py::test_name
