@@ -8,6 +8,7 @@ from src.utils import (
     extract_text_from_pdf,
     extract_text_from_pptx,
     transcribe_audio_with_whisper,
+    extract_text_from_txt,
 )
 from src.logging_helper import LoggingHelper
 from .logging_helper import create_progress_bar, update_progress_bar, close_progress_bar
@@ -42,15 +43,17 @@ class DocumentProcessor:
 
         # Get all files in directory by type
         pdf_files = list(directory.glob("*.pdf"))
-        print(directory)
         pptx_files = list(directory.glob("*.pptx")) + list(directory.glob("*.ppt"))
+        txt_files = list(directory.glob("*.txt"))
         audio_files = (
             list(directory.glob("*.mp4"))
             + list(directory.glob("*.wav"))
             + list(directory.glob("*.mp3"))
         )
 
-        total_files = len(pdf_files) + len(pptx_files) + len(audio_files)
+        total_files = (
+            len(pdf_files) + len(pptx_files) + len(txt_files) + len(audio_files)
+        )
         if total_files == 0:
             logging.warning("No supported files found in directory")
             return {}
@@ -76,6 +79,18 @@ class DocumentProcessor:
             try:
                 logging.info(f"Processing PowerPoint: {file_path.name}")
                 text = extract_text_from_pptx(file_path, self.verbosity)
+                if text:
+                    self.openai_helper.add_document(text)
+            except Exception as e:
+                logging.error(f"Error processing {file_path.name}: {e}")
+            processed += 1
+            update_progress_bar(pbar, processed, total_files)
+
+        # Process text files
+        for file_path in txt_files:
+            try:
+                logging.info(f"Processing text file: {file_path.name}")
+                text = extract_text_from_txt(file_path, self.verbosity)
                 if text:
                     self.openai_helper.add_document(text)
             except Exception as e:

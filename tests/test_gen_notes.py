@@ -16,6 +16,7 @@ from src.utils import (
     extract_text_from_pdf,
     extract_text_from_pptx,
     transcribe_audio_with_whisper,
+    extract_text_from_txt,
 )
 from src.logging_helper import setup_colored_logging
 
@@ -152,6 +153,14 @@ def sample_mp4(tmp_path):
     mp4_path = tmp_path / "test.mp4"
     mp4_path.write_text("Test video content")
     return mp4_path
+
+
+@pytest.fixture
+def sample_txt(tmp_path):
+    """Create a sample text file for testing."""
+    txt_path = tmp_path / "sample.txt"
+    txt_path.write_text("Sample text content")
+    return txt_path
 
 
 def test_extract_text_from_pdf(sample_pdf, sample_pdf_text):
@@ -350,8 +359,12 @@ def test_setup_logging(temp_dir):
 
 @patch("src.check_dependencies")
 @patch("src.DocumentProcessor")
-def test_main(mock_processor_class, mock_check, temp_dir):
-    """Test the main function with mocked dependencies."""
+@patch("builtins.input")
+@patch("subprocess.run")
+def test_main_interactive_with_edit(
+    mock_subprocess_run, mock_input, mock_processor_class, mock_check, temp_dir
+):
+    """Test the main function in interactive mode with edit functionality."""
     # Create a resource directory for testing
     resource_dir = temp_dir / "Learning Resources"
     resource_dir.mkdir()
@@ -364,8 +377,14 @@ def test_main(mock_processor_class, mock_check, temp_dir):
     }
     mock_processor_class.return_value = mock_processor
 
-    # Setup test arguments
-    test_args = ["gen_notes.py", str(resource_dir)]
+    # Mock user input to choose edit option
+    mock_input.return_value = "e"
+
+    # Mock nano subprocess to simulate editing
+    mock_subprocess_run.return_value = MagicMock(returncode=0)
+
+    # Setup test arguments with interactive mode
+    test_args = ["gen_notes.py", str(temp_dir), "-i"]
     with patch("sys.argv", test_args):
         main()
 
@@ -379,6 +398,10 @@ def test_main(mock_processor_class, mock_check, temp_dir):
     notes_dir = temp_dir / "notes"
     assert notes_dir.exists()
     assert (notes_dir / "Test Topic.md").exists()
+
+    # Verify nano was called
+    mock_subprocess_run.assert_called_once()
+    assert mock_subprocess_run.call_args[0][0][0] == "nano"
 
 
 def test_document_processor_initialization():
@@ -520,6 +543,98 @@ def test_progress_bar_verbosity():
 
     processor = DocumentProcessor(verbosity=2)
     assert processor.verbosity == 2
+
+
+def test_extract_text_from_txt(sample_txt):
+    """Test text file extraction."""
+    with patch("src.utils.logging") as mock_logging:
+        text = extract_text_from_txt(sample_txt)
+        assert text == "Sample text content"
+        mock_logging.info.assert_called_once()
+        mock_logging.error.assert_not_called()
+
+
+def test_process_directory_with_txt(
+    tmp_path,
+    mock_openai_client,
+    mock_openai_response,
+    sample_pdf,
+    sample_pptx,
+    sample_mp4,
+    sample_txt,
+):
+    """Test processing a directory with various file types including text files."""
+    # Copy sample files to temp directory
+    test_pdf = tmp_path / "test1.pdf"
+    test_pptx = tmp_path / "test1.pptx"
+    test_mp4 = tmp_path / "test1.mp4"
+    test_txt = tmp_path / "test1.txt"
+    shutil.copy(str(sample_pdf), str(test_pdf))
+    shutil.copy(str(sample_pptx), str(test_pptx))
+    shutil.copy(str(sample_mp4), str(test_mp4))
+    shutil.copy(str(sample_txt), str(test_txt))
+
+    # Mock file processing functions
+    with (
+        patch("src.document_processor.extract_text_from_pdf") as mock_pdf,
+        patch("src.document_processor.extract_text_from_pptx") as mock_pptx,
+        patch("src.document_processor.transcribe_audio_with_whisper") as mock_mp4,
+        patch("src.document_processor.extract_text_from_txt") as mock_txt,
+        patch("openai.OpenAI") as mock_openai_class,
+        patch("src.document_processor.logging") as mock_logging,
+        patch("src.openai_helper.logging") as mock_openai_logging,
+        patch("src.utils.logging") as mock_utils_logging,
+    ):
+        mock_pdf.return_value = "PDF content"
+        mock_pptx.return_value = "PowerPoint content"
+        mock_mp4.return_value = "Video content"
+        mock_txt.return_value = "Text content"
+        mock_openai_class.return_value = mock_openai_client
+
+        # Create a processor with the mocked OpenAI client
+        processor = DocumentProcessor(verbosity=1)
+        processor.openai_helper.client = mock_openai_client
+
+        # Process the directory
+        result = processor.process_directory(tmp_path)
+
+        # Verify the results
+        assert "topics" in result
+        assert "Test Topic" in result["topics"]
+        assert mock_pdf.called
+        assert mock_pptx.called
+        assert mock_mp4.called
+        assert mock_txt.called
+
+        # Verify the mock calls
+        mock_pdf.assert_has_calls(
+            [
+                call(test_pdf, processor.verbosity),
+                call(sample_pdf, processor.verbosity),
+            ],
+            any_order=True,
+        )
+        mock_pptx.assert_has_calls(
+            [
+                call(test_pptx, processor.verbosity),
+                call(sample_pptx, processor.verbosity),
+            ],
+            any_order=True,
+        )
+        mock_mp4.assert_has_calls(
+            [
+                call(test_mp4, processor.verbosity),
+                call(sample_mp4, processor.verbosity),
+            ],
+            any_order=True,
+        )
+        mock_txt.assert_has_calls(
+            [
+                call(test_txt, processor.verbosity),
+                call(sample_txt, processor.verbosity),
+            ],
+            any_order=True,
+        )
 
 
 if __name__ == "__main__":

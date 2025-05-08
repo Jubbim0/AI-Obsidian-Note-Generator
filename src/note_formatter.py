@@ -3,7 +3,8 @@
 import logging
 import urllib.parse
 import requests
-from typing import Dict, List
+from typing import Dict, List, Set
+from pathlib import Path
 
 from .logging_helper import LoggingHelper
 
@@ -14,6 +15,15 @@ class NoteFormatter:
     def __init__(self, verbosity: int = 1):
         self.verbosity = verbosity
         self.logger = LoggingHelper(verbosity)
+        self._existing_topics: Set[str] = set()
+
+    def set_existing_topics(self, topics: Dict[str, Dict]) -> None:
+        """Set the list of existing topics that will be created.
+
+        Args:
+            topics (Dict[str, Dict]): Dictionary of topics and their subtopics
+        """
+        self._existing_topics = set(topics.keys())
 
     def get_wikipedia_definition(self, topic: str) -> str:
         """Get the definition of a topic from Wikipedia."""
@@ -57,15 +67,20 @@ class NoteFormatter:
         # Add subtopics with proper heading levels
         self._add_subtopics(content, subtopics, 2)
 
-        # Add Related Topics section
-        if associated_topics:
+        # Filter associated topics to only include those that exist or will be created
+        valid_associated_topics = [
+            topic for topic in associated_topics if topic in self._existing_topics
+        ]
+
+        # Add Related Topics section only if there are valid associated topics
+        if valid_associated_topics:
             content.extend(
                 [
                     "",
                     "## Related Topics",
                     *[
                         f"- [{topic}]({urllib.parse.quote(topic)}.md)"
-                        for topic in associated_topics
+                        for topic in valid_associated_topics
                     ],
                 ]
             )

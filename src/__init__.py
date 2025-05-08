@@ -13,7 +13,7 @@ load_dotenv()
 
 from .document_processor import DocumentProcessor
 from .note_formatter import NoteFormatter
-from .logging_helper import LoggingHelper
+from .logging_helper import LoggingHelper, setup_colored_logging
 from .openai_helper import OpenAIHelper
 from .utils import setup_logging, check_dependencies
 
@@ -81,6 +81,9 @@ def main():
         logging.error("No topics were generated.")
         sys.exit(1)
 
+    # Set existing topics in the note formatter
+    note_formatter.set_existing_topics(topics["topics"])
+
     # Create notes directory
     notes_dir = root_path / "notes"
     notes_dir.mkdir(exist_ok=True)
@@ -96,6 +99,52 @@ def main():
 
             # Create the note file
             note_file = notes_dir / f"{topic}.md"
+
+            if args.interactive:
+                print(f"\nFile to be created: {note_file.name}")
+                while True:
+                    response = input(
+                        "Create this file? (y)es/(n)o/(e)dit/(a)bort: "
+                    ).lower()
+                    if response == "y":
+                        break
+                    elif response == "n":
+                        logging.info(f"Skipping file: {note_file.name}")
+                        continue
+                    elif response == "e":
+                        # Create a temporary file with the content
+                        import tempfile
+                        import subprocess
+                        import os
+
+                        with tempfile.NamedTemporaryFile(
+                            mode="w", suffix=".md", delete=False
+                        ) as temp_file:
+                            temp_file.write(content)
+                            temp_path = temp_file.name
+
+                        try:
+                            # Open the file in nano
+                            subprocess.run(["nano", temp_path], check=True)
+
+                            # Read the edited content
+                            with open(temp_path, "r") as temp_file:
+                                content = temp_file.read()
+
+                            # Clean up the temporary file
+                            os.unlink(temp_path)
+                            break
+                        except Exception as e:
+                            logging.error(f"Error editing file: {e}")
+                            os.unlink(temp_path)
+                            continue
+                    elif response == "a":
+                        logging.info("Aborting all file creation")
+                        return
+                    else:
+                        print("Invalid input. Please enter y, n, e, or a.")
+
+            # Write the content to the file
             with open(note_file, "w", encoding="utf-8") as f:
                 f.write(content)
 

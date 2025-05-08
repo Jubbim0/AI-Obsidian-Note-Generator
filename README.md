@@ -232,6 +232,7 @@ The test suite includes:
 
 - PDF (.pdf)
 - PowerPoint (.pptx, .ppt)
+- Text (.txt)
 - Video (.mp4) - requires Whisper for transcription
 
 ## Output

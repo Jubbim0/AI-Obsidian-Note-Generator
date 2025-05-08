@@ -134,3 +134,22 @@ def transcribe_audio_with_whisper(mp4_path: Path, verbosity: int = 1) -> str:
     except Exception as e:
         logging.error(f"Error processing MP4 {mp4_path.name}: {e}")
         return ""
+
+
+def extract_text_from_txt(txt_path: Path, verbosity: int = 1) -> str:
+    """Extract text from a text file.
+
+    Args:
+        txt_path (Path): Path to the text file
+        verbosity (int): Logging verbosity level
+
+    Returns:
+        str: Extracted text content
+    """
+    try:
+        logging.info(f"Processing text file: {txt_path.name}")
+        with open(txt_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        logging.error(f"Error processing text file {txt_path.name}: {e}")
+        return ""
