@@ -287,9 +287,11 @@ def test_existing_topics_awareness(document_processor):
 
 def test_openai_helper_token_cost(mock_openai_helper):
     """Test token cost calculation."""
-    # Test GPT-4 costs
-    gpt4_cost = mock_openai_helper.calculate_token_cost("gpt-4", 1000, 500)
-    assert gpt4_cost == (1000 * 0.03 / 1000) + (500 * 0.06 / 1000)
+    # Test GPT-4 Turbo costs
+    gpt4_cost = mock_openai_helper.calculate_token_cost(
+        "gpt-4-turbo-preview", 1000, 500
+    )
+    assert gpt4_cost == (1000 * 0.01 / 1000) + (500 * 0.03 / 1000)
 
     # Test unknown model
     unknown_cost = mock_openai_helper.calculate_token_cost("unknown", 1000, 500)
@@ -635,6 +637,181 @@ def test_process_directory_with_txt(
             ],
             any_order=True,
         )
+
+
+def test_clean_json_response():
+    """Test cleaning of improperly formatted JSON responses."""
+    from src.openai_helper import OpenAIHelper
+
+    helper = OpenAIHelper()
+
+    # Test case 1: JSON wrapped in markdown code block
+    input_json = """```json
+{
+    "topics": {
+        "Test Topic": {
+            "Subtopic": "Content"
+        }
+    }
+}
+```"""
+    expected = '{\n    "topics": {\n        "Test Topic": {\n            "Subtopic": "Content"\n        }\n    }\n}'
+    assert helper._clean_json_response(input_json) == expected
+
+    # Test case 2: JSON with extra text before and after
+    input_json = 'Some text before {"topics": {"Test": "Content"}} some text after'
+    expected = '{"topics": {"Test": "Content"}}'
+    assert helper._clean_json_response(input_json) == expected
+
+    # Test case 3: JSON with multiple code blocks
+    input_json = """First block
+```json
+{
+    "topics": {
+        "Test": "Content"
+    }
+}
+```
+Second block"""
+    expected = '{\n    "topics": {\n        "Test": "Content"\n    }\n}'
+    assert helper._clean_json_response(input_json) == expected
+
+    # Test case 4: Invalid JSON (no braces)
+    with pytest.raises(ValueError, match="No valid JSON object found in response"):
+        helper._clean_json_response("This is not a JSON object")
+
+
+def test_generate_topics_with_improper_json():
+    """Test topic generation with improperly formatted JSON responses."""
+    from src.openai_helper import OpenAIHelper
+    from unittest.mock import MagicMock, patch
+
+    # Mock logging to prevent TypeError
+    with patch("logging.info"), patch("logging.error"), patch("logging.debug"):
+        helper = OpenAIHelper()
+        helper.add_document("Test content")
+
+        # Mock response with markdown-wrapped JSON
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content="""```json
+{
+    "topics": {
+        "Test Topic": {
+            "Subtopic": "Content"
+        }
+    },
+    "associated_topics": {
+        "Test Topic": ["Related Topic"]
+    }
+}
+```"""
+                )
+            )
+        ]
+        mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
+
+        with patch.object(
+            helper.client.chat.completions, "create", return_value=mock_response
+        ):
+            topics = helper.generate_topics(verbosity=2)
+
+            assert "Test Topic" in topics["topics"]
+            assert "Subtopic" in topics["topics"]["Test Topic"]
+            assert topics["topics"]["Test Topic"]["Subtopic"] == "Content"
+            assert "Test Topic" in topics["associated_topics"]
+            assert "Related Topic" in topics["associated_topics"]["Test Topic"]
+
+
+def test_document_chunking():
+    """Test document chunking functionality."""
+    from src.openai_helper import OpenAIHelper
+
+    helper = OpenAIHelper()
+
+    # Test case 1: Small document (should not be chunked)
+    small_doc = "This is a small document.\n\nIt has two paragraphs."
+    chunks = helper._chunk_document(small_doc)
+    assert len(chunks) == 1
+    assert chunks[0] == small_doc
+
+    # Set a small chunk size for testing
+    helper.chunk_size = 100  # much smaller than default
+
+    # Test case 2: Large document (should be chunked)
+    large_doc = "\n\n".join(["Paragraph " + str(i) for i in range(1000)])
+    chunks = helper._chunk_document(large_doc)
+    assert len(chunks) > 1
+
+    # Test case 3: Document with very large paragraphs
+    large_paragraph = "x" * (
+        helper.chunk_size * 4
+    )  # Create a paragraph larger than chunk size
+    doc_with_large_para = (
+        f"Small paragraph.\n\n{large_paragraph}\n\nAnother small paragraph."
+    )
+    chunks = helper._chunk_document(doc_with_large_para)
+    assert len(chunks) > 1
+    assert all(len(chunk) <= helper.chunk_size * 4 for chunk in chunks)
+
+
+def test_token_rate_limiting():
+    """Test token rate limiting functionality."""
+    from src.openai_helper import OpenAIHelper
+    import time
+
+    helper = OpenAIHelper()
+
+    # Test case 1: Token usage tracking
+    helper.token_usage_history = [(time.time(), 1000)]
+    current_usage = helper._get_current_token_usage()
+    assert current_usage == 1000
+
+    # Test case 2: Token history cleaning
+    old_time = time.time() - 61  # Just over a minute old
+    helper.token_usage_history = [(old_time, 1000), (time.time(), 500)]
+    helper._clean_token_history()
+    assert len(helper.token_usage_history) == 1
+    assert helper.token_usage_history[0][1] == 500
+
+
+def test_api_call_with_retry():
+    """Test API call retry logic."""
+    from src.openai_helper import OpenAIHelper
+    from unittest.mock import patch, MagicMock
+
+    helper = OpenAIHelper()
+
+    # Mock the OpenAI client
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content='{"topics": {"Test": "Content"}}'))
+    ]
+    mock_response.usage = MagicMock(prompt_tokens=100, completion_tokens=50)
+
+    with patch.object(helper.client.chat.completions, "create") as mock_create:
+        # Test case 1: Successful call
+        mock_create.return_value = mock_response
+        response = helper._make_api_call_with_retry(
+            [{"role": "user", "content": "test"}]
+        )
+        assert response == mock_response
+        assert mock_create.call_count == 1
+
+        # Test case 2: Rate limit with retry
+        mock_create.side_effect = [Exception("rate_limit_exceeded"), mock_response]
+        response = helper._make_api_call_with_retry(
+            [{"role": "user", "content": "test"}]
+        )
+        assert response == mock_response
+        assert mock_create.call_count == 3  # Initial + 2 retries
+
+        # Test case 3: Non-rate-limit error
+        mock_create.side_effect = Exception("other_error")
+        with pytest.raises(Exception, match="other_error"):
+            helper._make_api_call_with_retry([{"role": "user", "content": "test"}])
 
 
 if __name__ == "__main__":

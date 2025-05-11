@@ -39,7 +39,26 @@ install: check-deps $(VENV_DIR)
 	fi
 	@# Add aliases with proper quoting for paths with spaces
 	@echo 'alias gen-notes="source ~/.gen-notes-venv/bin/activate && python3 -m src \"\$$@\""' >> ~/.zshrc
-	@echo 'gen-notes-concur() { for dir in "$$@"; do gen-notes "$$dir" & done; wait; }' >> ~/.zshrc
+	@echo 'gen-notes-concur() {' >> ~/.zshrc
+	@echo '    # Extract options (anything starting with -)' >> ~/.zshrc
+	@echo '    local options=()' >> ~/.zshrc
+	@echo '    local dirs=()' >> ~/.zshrc
+	@echo '    ' >> ~/.zshrc
+	@echo '    # Separate options and directories' >> ~/.zshrc
+	@echo '    for arg in "$$@"; do' >> ~/.zshrc
+	@echo '        if [[ $$arg == -* ]]; then' >> ~/.zshrc
+	@echo '            options+=("$$arg")' >> ~/.zshrc
+	@echo '        else' >> ~/.zshrc
+	@echo '            dirs+=("$$arg")' >> ~/.zshrc
+	@echo '        fi' >> ~/.zshrc
+	@echo '    done' >> ~/.zshrc
+	@echo '    ' >> ~/.zshrc
+	@echo '    # Process each directory with the options' >> ~/.zshrc
+	@echo '    for dir in "$${dirs[@]}"; do' >> ~/.zshrc
+	@echo '        (source ~/.gen-notes-venv/bin/activate && python3 -m src "$${options[@]}" "$$dir") &' >> ~/.zshrc
+	@echo '    done' >> ~/.zshrc
+	@echo '    wait' >> ~/.zshrc
+	@echo '}' >> ~/.zshrc
 	@echo "Installation complete! Please restart your shell or run 'source ~/.zshrc'"
 
 uninstall:

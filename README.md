@@ -113,8 +113,8 @@ Running `make install` will:
 5. Configure everything to work with paths containing spaces and special characters
 
 After installation, you can use:
-- `gen-notes <lecture_dir> [options]` for single directory processing
-- `gen-notes-concur <lecture_dir1> <lecture_dir2> ...` for concurrent processing of multiple directories
+- `gen-notes "<lecture_dir>" [options]` for single directory processing
+- `gen-notes-concur [options] "<lecture_dir1>" "<lecture_dir2>" ...` for concurrent processing of multiple directories
 
 # Usage
 
