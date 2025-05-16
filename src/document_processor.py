@@ -30,7 +30,9 @@ class DocumentProcessor:
         self.logger = logger or LoggingHelper(verbosity=verbosity)
         self.existing_topics = set()
 
-    def process_directory(self, directory: Path) -> Dict[str, str]:
+    def process_directory(
+        self, directory: Path
+    ) -> Tuple[Dict[str, str], Dict[str, List[str]]]:
         """Process all documents in a directory and extract topics.
 
         Args:
@@ -68,7 +70,7 @@ class DocumentProcessor:
                 logging.info(f"Processing PDF: {file_path.name}")
                 text = extract_text_from_pdf(file_path, self.verbosity)
                 if text:
-                    self.openai_helper.add_document(text)
+                    self.openai_helper.add_document(text, file_path.stem)
             except Exception as e:
                 logging.error(f"Error processing {file_path.name}: {e}")
             processed += 1
@@ -80,7 +82,7 @@ class DocumentProcessor:
                 logging.info(f"Processing PowerPoint: {file_path.name}")
                 text = extract_text_from_pptx(file_path, self.verbosity)
                 if text:
-                    self.openai_helper.add_document(text)
+                    self.openai_helper.add_document(text, file_path.stem)
             except Exception as e:
                 logging.error(f"Error processing {file_path.name}: {e}")
             processed += 1
@@ -92,7 +94,7 @@ class DocumentProcessor:
                 logging.info(f"Processing text file: {file_path.name}")
                 text = extract_text_from_txt(file_path, self.verbosity)
                 if text:
-                    self.openai_helper.add_document(text)
+                    self.openai_helper.add_document(text, file_path.stem)
             except Exception as e:
                 logging.error(f"Error processing {file_path.name}: {e}")
             processed += 1
@@ -104,7 +106,7 @@ class DocumentProcessor:
                 logging.info(f"Transcribing {file_path.name} using Whisper...")
                 text = transcribe_audio_with_whisper(file_path, self.verbosity)
                 if text:
-                    self.openai_helper.add_document(text)
+                    self.openai_helper.add_document(text, file_path.stem)
             except Exception as e:
                 logging.error(f"Error processing {file_path.name}: {e}")
             processed += 1
@@ -116,7 +118,7 @@ class DocumentProcessor:
         logging.info("Generating topics from processed documents...")
         topics = self.openai_helper.generate_topics()
 
-        return topics
+        return topics, self.openai_helper.index_topics
 
     def process_single_document(self, file_path: Path) -> Tuple[Dict[str, str], float]:
         """Process a single document and extract topics.
@@ -139,7 +141,7 @@ class DocumentProcessor:
             return {}, 0.0
 
         # Add document to OpenAI helper
-        self.openai_helper.add_document(text)
+        self.openai_helper.add_document(text, file_path.stem)
 
         # Generate topics
         topics = self.openai_helper.generate_topics(self.verbosity)

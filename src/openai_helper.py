@@ -3,6 +3,10 @@
 import json
 import logging
 import time
+
+import re
+import tiktoken
+
 from typing import Dict, List, Optional, Tuple
 from openai import OpenAI
 from .logging_helper import create_progress_bar, update_progress_bar, close_progress_bar
@@ -13,6 +17,7 @@ MAX_TOKENS_PER_MINUTE = 30000  # GPT-4 Turbo's limit
 TOKEN_WINDOW = 60  # 1 minute window
 MAX_RETRIES = 5
 INITIAL_BACKOFF = 1  # Initial backoff in seconds
+MAX_TOKENS = MAX_TOKENS_PER_MINUTE // 2
 
 
 class OpenAIHelper:
@@ -24,10 +29,11 @@ class OpenAIHelper:
         """Initialize the OpenAI helper."""
         self.client = client or OpenAI()
         self.system_prompt = system_prompt or self._get_default_system_prompt()
-        self.documents: List[str] = []
+        self.documents: Dict[str, str] = {}
         self.verbosity = 1
         self.token_usage_history: List[Tuple[float, int]] = []  # (timestamp, tokens)
-        self.chunk_size = 100000  # Approximate tokens per chunk
+        self.chunk_size = 10000  # Approximate tokens per chunk
+        self.index_topics: Dict[str, List[str]] = {}
 
     def _get_default_system_prompt(self) -> str:
         """Get the default system prompt for topic extraction."""
@@ -67,36 +73,77 @@ class OpenAIHelper:
 
     def _wait_for_token_limit(self, required_tokens: int) -> None:
         """Wait if necessary to stay within token rate limits."""
+        t = 0
         while True:
             current_usage = self._get_current_token_usage()
             if current_usage + required_tokens <= MAX_TOKENS_PER_MINUTE:
                 break
+            if t % 5 == 0:
+                if self.verbosity >= 1:
+                    logging.info(f"Waiting for token limit: {t} seconds")
+                if self.verbosity >= 1:
+                    logging.debug(
+                        f"""Current token usage: {self._get_current_token_usage()} | Max tokens per minute: {MAX_TOKENS_PER_MINUTE}
+                        Token limit exceeded by {current_usage + required_tokens - MAX_TOKENS_PER_MINUTE} tokens
+                        \nToken usage history: {self.token_usage_history}"""
+                    )
+            t += 1
             time.sleep(1)  # Wait a second and check again
 
     def _chunk_document(self, text: str) -> List[str]:
         """Split a document into smaller chunks based on approximate token count."""
-        # Rough estimate: 1 token ≈ 4 characters for English text
+        max_tokens = MAX_TOKENS
+        enc = tiktoken.get_encoding(
+            "cl100k_base"
+        )  # Default encoding used for OpenAI models
+
+        tokens = enc.encode(text)
+
+        if len(tokens) <= max_tokens:
+            return [text]
+
+        # Split into paragraphs first
+        paragraphs = re.split(r"\n\s*\n", text)
         chunks = []
         current_chunk = ""
-        current_size = 0
 
-        # Split by paragraphs to maintain context
-        paragraphs = text.split("\n\n")
+        for para in paragraphs:
+            para = para.strip()
+            if not para:
+                continue
 
-        for paragraph in paragraphs:
-            # Rough estimate of tokens in this paragraph
-            paragraph_tokens = len(paragraph) // 4
-
-            if current_size + paragraph_tokens > self.chunk_size:
-                if current_chunk:
-                    chunks.append(current_chunk)
-                current_chunk = paragraph
-                current_size = paragraph_tokens
+            if token_len(para) > max_tokens:
+                # Paragraph itself is too long: split by sentences
+                sentences = re.split(r"(?<=[.!?])\s+", para)
+                temp_chunk = ""
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if not sentence:
+                        continue
+                    if token_len(sentence) > max_tokens:
+                        # Fallback: sentence too long, force cut into overlapping token chunks
+                        sentence_tokens = enc.encode(sentence)
+                        start = 0
+                        while start < len(sentence_tokens):
+                            end = min(start + max_tokens, len(sentence_tokens))
+                            chunk = enc.decode(sentence_tokens[start:end])
+                            chunks.append(chunk)
+                            start += max_tokens // 2  # 50% overlap
+                    else:
+                        if token_len(temp_chunk + " " + sentence) <= max_tokens:
+                            temp_chunk = (temp_chunk + " " + sentence).strip()
+                        else:
+                            chunks.append(temp_chunk)
+                            temp_chunk = sentence
+                if temp_chunk:
+                    chunks.append(temp_chunk)
             else:
-                if current_chunk:
-                    current_chunk += "\n\n"
-                current_chunk += paragraph
-                current_size += paragraph_tokens
+                if token_len(current_chunk + "\n\n" + para) <= max_tokens:
+                    current_chunk = (current_chunk + "\n\n" + para).strip()
+                else:
+                    if current_chunk:
+                        chunks.append(current_chunk)
+                    current_chunk = para
 
         if current_chunk:
             chunks.append(current_chunk)
@@ -104,7 +151,7 @@ class OpenAIHelper:
         return chunks
 
     def _make_api_call_with_retry(
-        self, messages: List[Dict], temperature: float = 0.4
+        self, messages: List[Dict], temperature: float = 0.4, verbosity: int = 1
     ) -> Dict:
         """Make an API call with exponential backoff retry logic and granular error handling."""
         backoff = INITIAL_BACKOFF
@@ -112,9 +159,11 @@ class OpenAIHelper:
 
         for attempt in range(MAX_RETRIES):
             try:
+                if verbosity >= 1:
+                    logging.info(f"Attempt {attempt + 1} of {MAX_RETRIES}")
                 # Estimate tokens in the request
-                estimated_tokens = sum(len(msg["content"]) // 4 for msg in messages)
-                self._wait_for_token_limit(estimated_tokens)
+                # estimated_tokens = sum(len(msg["content"]) // 4 for msg in messages)
+                # self._wait_for_token_limit(estimated_tokens)
 
                 response = self.client.chat.completions.create(
                     model="gpt-4-turbo-preview",
@@ -123,26 +172,36 @@ class OpenAIHelper:
                 )
 
                 # Record token usage
-                total_tokens = (
-                    response.usage.prompt_tokens + response.usage.completion_tokens
-                )
-                self.token_usage_history.append((time.time(), total_tokens))
+                # total_tokens = (
+                #     response.usage.prompt_tokens + response.usage.completion_tokens
+                # )
+                # self.token_usage_history.append((time.time(), total_tokens))
 
                 return response
 
-            except openai.error.RateLimitError as e:
-                logging.warning(f"OpenAI rate limit exceeded: {e}")
-                last_error = e
+            except openai.RateLimitError as e:
+                logging.warning(f"\nOpenAI rate limit exceeded:\n{e}")
                 if attempt < MAX_RETRIES - 1:
+                    logging.info(
+                        f"\nRetry Information:\n"
+                        f"  - Attempt: {attempt + 1}/{MAX_RETRIES}\n"
+                        f"  - Wait time: {backoff} seconds\n"
+                        f"  - Next attempt will use {backoff * 2} seconds if needed"
+                    )
                     time.sleep(backoff)
                     backoff *= 2
                     continue
                 else:
-                    logging.error("Max retries reached for rate limit error.")
-            except openai.error.AuthenticationError as e:
+                    logging.error(
+                        f"\nRate Limit Error Summary:\n"
+                        f"  - Maximum retries ({MAX_RETRIES}) reached\n"
+                        f"  - Last error: {e}\n"
+                        f"  - Total wait time: {sum(2**i for i in range(attempt))} seconds"
+                    )
+            except openai.AuthenticationError as e:
                 logging.error(f"OpenAI authentication error: {e}. Check your API key.")
                 raise
-            except openai.error.APIConnectionError as e:
+            except openai.APIConnectionError as e:
                 logging.error(
                     f"OpenAI API connection error: {e}. Check your network connection."
                 )
@@ -153,7 +212,7 @@ class OpenAIHelper:
                     continue
                 else:
                     logging.error("Max retries reached for API connection error.")
-            except openai.error.Timeout as e:
+            except openai.Timeout as e:
                 logging.error(f"OpenAI request timed out: {e}.")
                 last_error = e
                 if attempt < MAX_RETRIES - 1:
@@ -162,12 +221,12 @@ class OpenAIHelper:
                     continue
                 else:
                     logging.error("Max retries reached for timeout error.")
-            except openai.error.InvalidRequestError as e:
+            except openai.InvalidRequestError as e:
                 logging.error(
                     f"OpenAI invalid request: {e}. Check your prompt and parameters."
                 )
                 raise
-            except openai.error.APIError as e:
+            except openai.APIError as e:
                 logging.error(
                     f"OpenAI server error: {e}. This may be a temporary issue."
                 )
@@ -185,9 +244,10 @@ class OpenAIHelper:
 
         raise last_error
 
-    def add_document(self, text: str):
+    def add_document(self, text: str, file_name: str):
         """Add a document to be processed."""
-        self.documents.append(text)
+        self.documents[file_name] = text
+        self.index_topics[file_name] = []
 
     def _clean_json_response(self, content: str) -> str:
         """Clean a JSON response by removing markdown formatting and extra characters.
@@ -210,7 +270,7 @@ class OpenAIHelper:
 
     def generate_topics(self, verbosity: int = 1) -> Dict[str, str]:
         """Generate topics from all added documents."""
-        if not self.documents:
+        if not list(self.documents.keys()):
             logging.warning("No documents to process")
             return {}
 
@@ -220,20 +280,34 @@ class OpenAIHelper:
         all_topics = {"topics": {}, "associated_topics": {}}
         total_cost = 0.0
 
-        for i, doc in enumerate(self.documents):
+        for i, (file_name, doc) in enumerate(self.documents.items()):
             try:
+                if verbosity >= 1:
+                    logging.info(
+                        f"Topic Extraction Begin: Document {i + 1} of {len(list(self.documents.keys()))}"
+                    )
                 # Split document into chunks
                 chunks = self._chunk_document(doc)
+                if verbosity >= 1:
+                    logging.info(f"Document {i + 1} has {len(chunks)} chunks")
                 chunk_topics = []
-
-                for chunk in chunks:
+                if verbosity >= 1:
+                    logging.info(f"Chunks: {chunks}")
+                for j, chunk in enumerate(chunks):
+                    if verbosity >= 1:
+                        logging.info(f"Processing chunk {j + 1} of {len(chunks)}")
+                    if verbosity >= 1:
+                        logging.info(f"Chunk: {chunk}")
                     # Process each chunk
                     response = self._make_api_call_with_retry(
                         messages=[
                             {"role": "system", "content": self.system_prompt},
                             {"role": "user", "content": chunk},
-                        ]
+                        ],
+                        verbosity=verbosity,
                     )
+                    # if verbosity >= 1:
+                    #     logging.info(f"Response: {response}")
 
                     # Calculate cost
                     prompt_tokens = getattr(response.usage, "prompt_tokens", 0)
@@ -246,7 +320,7 @@ class OpenAIHelper:
                     if verbosity >= 1:
                         logging.info(
                             "Chunk processed for document {}/{}".format(
-                                i + 1, len(self.documents)
+                                i + 1, len(list(self.documents.keys()))
                             )
                         )
                         logging.info("Cost: ${:.4f}".format(cost))
@@ -262,9 +336,11 @@ class OpenAIHelper:
                             logging.error("Invalid response format")
                     except (json.JSONDecodeError, ValueError) as e:
                         logging.error("Error parsing topics JSON: {}".format(e))
-                        if verbosity >= 2:
-                            logging.debug("Raw response content: {}".format(content))
-
+                        # if verbosity >= 1:
+                        #     logging.debug("Raw response content: {}".format(content))
+                for topic_obj in chunk_topics:
+                    for topic in topic_obj["topics"].keys():
+                        self.index_topics[file_name].append(topic)
                 # Merge topics from all chunks
                 for topics in chunk_topics:
                     self._merge_topics(all_topics, topics)
@@ -333,23 +409,28 @@ class OpenAIHelper:
 
     def print_summary(self):
         """Print a summary of statistics at the end of the program."""
-        total_cost = (
-            sum(self.token_usage_history, key=lambda x: x[1])[1] * 0.01 / 1000
-        )  # Assuming 0.01 per 1K tokens
-        num_docs_processed = len(self.documents)
+        # total_cost = (
+        #     sum(self.token_usage_history, key=lambda x: x[1])[1] * 0.01 / 1000
+        # )  # Assuming 0.01 per 1K tokens
+        num_docs_processed = len(list(self.documents.keys()))
         num_docs_made = len(
-            self.documents
+            list(self.documents.keys())
         )  # Assuming each document is processed into a note
-        total_time = (
-            sum(self.token_usage_history, key=lambda x: x[0])[0]
-            - self.token_usage_history[0][0]
-            if self.token_usage_history
-            else 0
-        )
+        # total_time = (
+        #     sum(self.token_usage_history, key=lambda x: x[0])[0]
+        #     - self.token_usage_history[0][0]
+        #     if self.token_usage_history
+        #     else 0
+        # )
 
         print("\n\n\n=== Summary ===")
-        print(f"Total cost: ${total_cost:.4f}")
+        # print(f"Total cost: ${total_cost:.4f}")
         print(f"Number of documents processed: {num_docs_processed}")
         print(f"Number of documents made: {num_docs_made}")
-        print(f"Time taken for API calls: {total_time:.2f} seconds")
+        # print(f"Time taken for API calls: {total_time:.2f} seconds")
         print("==============\n")
+
+
+def token_len(s: str) -> int:
+    enc = tiktoken.get_encoding("cl100k_base")
+    return len(enc.encode(s))

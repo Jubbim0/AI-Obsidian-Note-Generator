@@ -54,6 +54,18 @@ class NoteFormatter:
             logging.error(f"Error fetching definition for {topic}: {e}")
             return ""
 
+    def format_index_page(self, topics: List[str]) -> str:
+        """Format the index page for the notes."""
+        content = [
+            "# Index",
+            "",
+            "## Topics",
+        ]
+        for topic in topics:
+            logging.info(f"Adding index for {topic}")
+            content.append(f"- [{topic}]({urllib.parse.quote(str(topic))}.md)")
+        return "\n".join(content)
+
     def format_topic_content(
         self, topic: str, subtopics: Dict, associated_topics: List[str]
     ) -> str:

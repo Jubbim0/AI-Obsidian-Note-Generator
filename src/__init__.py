@@ -59,7 +59,7 @@ def main():
 
     # Check dependencies first
     check_dependencies()
-
+    print(f"Verbosity: {args.verbosity}")
     # Convert to Path object
     resource_path = Path(args.resource_path)
     # Append "Learning Resources" to the path
@@ -76,7 +76,7 @@ def main():
     logger.log_section_header("Processing Documents")
 
     # Process all documents and get combined topics
-    topics = doc_processor.process_directory(resource_path)
+    topics, index_topics = doc_processor.process_directory(resource_path)
     if not topics:
         logging.error("No topics were generated.")
         sys.exit(1)
@@ -90,6 +90,7 @@ def main():
 
     # Create notes for each topic
     logger.log_section_header("Creating Notes")
+
     for topic, subtopics in topics["topics"].items():
         try:
             # Format the note content
@@ -153,6 +154,22 @@ def main():
 
         except Exception as e:
             logging.error(f"Error creating note for {topic}: {e}")
+            continue
+
+    for file_name, subtopics in index_topics.items():
+        if not subtopics:
+            continue
+        try:
+            content = note_formatter.format_index_page(subtopics)
+            note_file = root_path / f"{file_name}-Index.md"
+            with open(note_file, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            if args.verbosity >= 1:
+                logging.info(f"Created note: {note_file.name}")
+
+        except Exception as e:
+            logging.error(f"Error creating note for {file_name}: {e}")
             continue
 
     logging.info("Done!")
